@@ -1,0 +1,61 @@
+feature,importance
+num__Año Impacto humano,0.13290305127751714
+cat__Tipo de fenómeno_Ciclones,0.10043648380906962
+num__Impacto humano,0.0922732386333737
+num__Impacto humano^2,0.07301855641159215
+cat__Tipo de fenómeno_Sequía,0.06660519432542171
+num__Mes Impacto humano,0.05448730006864257
+num__Año^2,0.04542191190627075
+num__Año,0.0449170800798872
+num__Año Daños a infraestructura,0.0439192369287371
+num__Impacto humano Daños a infraestructura,0.03985253105556808
+num__Daños a infraestructura,0.03831499378560303
+cat__Tipo de fenómeno_Lluvias e Inundaciones,0.026956942975566965
+num__Daños a infraestructura^2,0.02630387192878836
+num__Año Mes,0.022664387950609217
+num__Mes Daños a infraestructura,0.021628929007701143
+num__Mes,0.02088738735998916
+num__Mes^2,0.020694492172695877
+cat__Estado_Veracruz,0.015276739345207005
+cat__Estado_Oaxaca,0.008249226680565469
+cat__Tipo de fenómeno_Frío Extremo,0.008153557427479816
+cat__Estado_Jalisco,0.007141876740960108
+cat__Estado_Chihuahua,0.00698857048881437
+cat__Estado_Chiapas,0.005903125417953627
+cat__Estado_Sinaloa,0.00542278772488932
+cat__Tipo de fenómeno_Calor Extremo,0.005417796878441447
+cat__Estado_Guerrero,0.005259387348447252
+cat__Tipo de fenómeno_Sismos,0.004835887946429376
+cat__Estado_Hidalgo,0.0037187149041412594
+cat__Estado_Baja California Sur,0.0036035065023195963
+cat__Estado_Michoacán,0.0035612538816875605
+cat__Estado_Tamaulipas,0.0033334054858749455
+cat__Estado_Puebla,0.0030397111797184797
+cat__Estado_Sonora,0.0029425935586877517
+cat__Estado_Coahuila,0.002595092965234656
+cat__Estado_Tabasco,0.002377911085274367
+cat__Estado_Nayarit,0.0023684789077900326
+cat__Estado_Colima,0.0022784524533670204
+cat__Tipo de fenómeno_Movimientos de Masa,0.0021775485061765187
+cat__Estado_México,0.0021493794162970384
+cat__Estado_Durango,0.0021361132492508862
+cat__Estado_San Luis Potosí,0.0020070795876730185
+cat__Estado_Campeche,0.0019053106879786397
+cat__Clasificación del fenómeno_Hidrometeorológico,0.001779610681143682
+cat__Estado_Quintana Roo,0.0017149920857389832
+cat__Clasificación del fenómeno_Geológico,0.0017091378746101793
+cat__Estado_Baja California,0.0016360393132814942
+cat__Tipo de fenómeno_Viento Extremo,0.0016238696897335747
+cat__Estado_Guanajuato,0.0016002884597083767
+cat__Estado_Nuevo León,0.0015822099797081909
+cat__Estado_Zacatecas,0.0012083163437326579
+cat__Estado_Ciudad de México,0.0010228760076938
+cat__Estado_Morelos,0.000676741443285457
+cat__Estado_Tlaxcala,0.0006708363129653892
+cat__Estado_Aguascalientes,0.0003532732683008041
+cat__Estado_Querétaro,0.00020926972093212676
+cat__Estado_Yucatán,8.28143055974081e-05
+cat__Tipo de fenómeno_Actividad Volcánica,6.264658744159935e-07
+cat__Estado_CDMX,0.0
+cat__Estado_Veracruz y Tamaulipas,0.0
+cat__Estado_Varios Estados,0.0

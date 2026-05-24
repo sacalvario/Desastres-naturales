@@ -1,0 +1,20 @@
+{
+  "inputs": [
+    "Año",
+    "Mes",
+    "Clasificación del fenómeno",
+    "Tipo de fenómeno",
+    "Estado",
+    "Impacto humano",
+    "Daños a infraestructura"
+  ],
+  "target": "Total de daños (millones de pesos)",
+  "rows_used": 3960,
+  "model_type": "ExtraTreesRegressor",
+  "target_transform": "log1p_expm1",
+  "metrics_test": {
+    "MAE": 154.81649111266603,
+    "R2": 0.375800680942602
+  },
+  "notes": "Modelo de daños económicos usando Año, Mes, Clasificación, Tipo de fenómeno, Estado, Impacto humano y Daños a infraestructura."
+}
