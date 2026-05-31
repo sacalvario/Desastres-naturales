@@ -1,6 +1,22 @@
 import { useState } from "react";
 import { predict } from "./api";
 
+const tiposPorClasificacion = {
+  Geológico: [
+    "Actividad Volcánica",
+    "Sismos",
+    "Movimientos de Masa",
+  ],
+  Hidrometeorológico: [
+    "Sequía",
+    "Ciclones",
+    "Frío Extremo",
+    "Lluvias e Inundaciones",
+    "Viento Extremo",
+    "Calor Extremo",
+  ],
+};
+
 export default function App() {
   const [form, setForm] = useState({
     Año: new Date().getFullYear(),
@@ -16,8 +32,20 @@ export default function App() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const onChange = (e) =>
-    setForm({ ...form, [e.target.name]: e.target.value });
+  const onChange = (e) => {
+    const { name, value } = e.target;
+
+    if (name === "Clasificación_del_fenómeno") {
+      setForm({
+        ...form,
+        Clasificación_del_fenómeno: value,
+        Tipo_de_fenómeno: "",
+      });
+      return;
+    }
+
+    setForm({ ...form, [name]: value });
+  };
 
   const limpiar = () => {
     setForm({
@@ -80,6 +108,9 @@ export default function App() {
 
   const monto = pred?.["Total de daños (millones de pesos)"] || 0;
   const nivel = getNivelImpacto(monto);
+
+  const tiposDisponibles =
+    tiposPorClasificacion[form.Clasificación_del_fenómeno] || [];
 
   return (
     <div
@@ -187,18 +218,28 @@ export default function App() {
                 value={form.Tipo_de_fenómeno}
                 onChange={onChange}
                 required
-                style={inputStyle}
+                disabled={!form.Clasificación_del_fenómeno}
+                style={{
+                  ...inputStyle,
+                  background: !form.Clasificación_del_fenómeno
+                    ? "#f3f4f6"
+                    : "white",
+                  cursor: !form.Clasificación_del_fenómeno
+                    ? "not-allowed"
+                    : "pointer",
+                }}
               >
-                <option value="">Selecciona tipo de fenómeno</option>
-                <option value="Sequía">Sequía</option>
-                <option value="Actividad Volcánica">Actividad Volcánica</option>
-                <option value="Ciclones">Ciclones</option>
-                <option value="Frío Extremo">Frío Extremo</option>
-                <option value="Lluvias e Inundaciones">Lluvias e Inundaciones</option>
-                <option value="Sismos">Sismos</option>
-                <option value="Viento Extremo">Viento Extremo</option>
-                <option value="Calor Extremo">Calor Extremo</option>
-                <option value="Movimientos de Masa">Movimientos de Masa</option>
+                <option value="">
+                  {form.Clasificación_del_fenómeno
+                    ? "Selecciona tipo de fenómeno"
+                    : "Primero selecciona clasificación"}
+                </option>
+
+                {tiposDisponibles.map((tipo) => (
+                  <option key={tipo} value={tipo}>
+                    {tipo}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
