@@ -232,7 +232,7 @@ export default function App() {
                 <option value="">
                   {form.Clasificación_del_fenómeno
                     ? "Selecciona tipo de fenómeno"
-                    : "Primero selecciona clasificación"}
+                    : ""}
                 </option>
 
                 {tiposDisponibles.map((tipo) => (
