@@ -138,7 +138,7 @@ export default function App() {
             fontSize: 34,
           }}
         >
-           Sistema de Predicción de Impacto Económico
+           Sistema de Predicción de Impacto Económico por Desastres Naturales
         </h1>
 
         <p
