@@ -138,7 +138,7 @@ export default function App() {
             fontSize: 34,
           }}
         >
-          🌪️ Sistema de Predicción de Impacto Económico
+           Sistema de Predicción de Impacto Económico
         </h1>
 
         <p
@@ -293,7 +293,7 @@ export default function App() {
 
           <div style={gridStyle}>
             <label>
-              Impacto humano
+              Población Afectada y Defunciones
               <select
                 name="Impacto_humano"
                 value={form.Impacto_humano}
@@ -302,11 +302,11 @@ export default function App() {
                 style={inputStyle}
               >
                 <option value="">Selecciona categoría</option>
-                <option value="1">1 - Muy bajo</option>
-                <option value="2">2 - Bajo</option>
-                <option value="3">3 - Medio</option>
-                <option value="4">4 - Alto</option>
-                <option value="5">5 - Muy alto</option>
+                <option value="1">0 - 10,000</option>
+                <option value="2">10,001 - 100,000</option>
+                <option value="3">100,001 - 500,000</option>
+                <option value="4">500,001 - 1,000,000</option>
+                <option value="5">Mayor a 1,000,000</option>
               </select>
             </label>
 
@@ -320,11 +320,11 @@ export default function App() {
                 style={inputStyle}
               >
                 <option value="">Selecciona categoría</option>
-                <option value="1">1 - Muy bajo</option>
-                <option value="2">2 - Bajo</option>
-                <option value="3">3 - Medio</option>
-                <option value="4">4 - Alto</option>
-                <option value="5">5 - Muy alto</option>
+                <option value="1">0 - 1,000</option>
+                <option value="2">1,001 - 10,000</option>
+                <option value="3">10,001 - 30,000</option>
+                <option value="4">30,001 - 100,000</option>
+                <option value="5">Mayor a 100,000</option>
               </select>
             </label>
           </div>
