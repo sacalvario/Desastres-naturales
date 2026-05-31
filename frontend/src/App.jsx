@@ -311,7 +311,7 @@ export default function App() {
             </label>
 
             <label>
-              Daños a infraestructura
+              Viviendas, Escuelas, Hospitales y Comercios Afectados
               <select
                 name="Daños_a_infraestructura"
                 value={form.Daños_a_infraestructura}
