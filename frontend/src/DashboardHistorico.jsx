@@ -49,6 +49,14 @@ const MOCK_TOP_ESTADOS = [
   { estado: "Puebla",           daños: 13200 },
 ];
 
+// CONECTAR: GET /stats/por-estado
+// Respuesta: [{ estado, daños, poblacion, total_eventos }]
+const MOCK_POR_ESTADO = MOCK_TOP_ESTADOS.map((d) => ({
+  ...d,
+  poblacion:     0,
+  total_eventos: 0,
+}));
+
 // CONECTAR: GET /stats/clasificacion
 // Respuesta: [{ label: string, value: number, color: string }]
 const MOCK_DISTRIBUCION = [
@@ -310,7 +318,7 @@ function DonutChart({ data }) {
           Eventos
         </text>
         <text x={cx} y={cy + 13} textAnchor="middle" fontSize={21} fontWeight="800" fill="#111827">
-          {total}%
+          {total.toLocaleString("es-MX")}
         </text>
       </svg>
 
@@ -423,30 +431,31 @@ function MapaMexico({ data }) {
             position:     "fixed",
             left:         tooltip.x + 14,
             top:          tooltip.y - 10,
-            background:   "#1f2937",
-            color:        "#f9fafb",
-            borderRadius: 8,
-            padding:      "10px 14px",
+            background:   "#ffffff",
+            color:        "#111827",
+            borderRadius: 10,
+            padding:      "12px 16px",
             fontSize:     13,
             pointerEvents:"none",
             zIndex:       9999,
-            boxShadow:    "0 4px 12px rgba(0,0,0,0.3)",
-            minWidth:     180,
-            lineHeight:   1.6,
+            boxShadow:    "0 6px 20px rgba(0,0,0,0.15)",
+            border:       "1px solid #e5e7eb",
+            minWidth:     200,
+            lineHeight:   1.7,
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 14 }}>{tooltip.nombre}</div>
+          <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14, borderBottom: "1px solid #f3f4f6", paddingBottom: 6 }}>{tooltip.nombre}</div>
           <div>
-            <span style={{ color: "#9ca3af" }}>Daños económicos: </span>
-            <strong>${tooltip.daños.toLocaleString("es-MX", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} M</strong>
+            <span style={{ color: "#6b7280" }}>Daños económicos: </span>
+            <strong style={{ color: "#111827" }}>${tooltip.daños.toLocaleString("es-MX", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} M</strong>
           </div>
           <div>
-            <span style={{ color: "#9ca3af" }}>Población afectada: </span>
-            <strong>{tooltip.poblacion.toLocaleString("es-MX")}</strong>
+            <span style={{ color: "#6b7280" }}>Población afectada: </span>
+            <strong style={{ color: "#111827" }}>{tooltip.poblacion.toLocaleString("es-MX")}</strong>
           </div>
           <div>
-            <span style={{ color: "#9ca3af" }}>Eventos registrados: </span>
-            <strong>{tooltip.total_eventos}</strong>
+            <span style={{ color: "#6b7280" }}>Eventos registrados: </span>
+            <strong style={{ color: "#111827" }}>{tooltip.total_eventos}</strong>
           </div>
         </div>
       )}
@@ -550,7 +559,7 @@ export default function DashboardHistorico() {
   const [kpis,         setKpis]         = useState(MOCK_KPIS);
   const [evolucion,    setEvolucion]    = useState(MOCK_EVOLUCION);
   const [topEstados,   setTopEstados]   = useState(MOCK_TOP_ESTADOS);
-  const [porEstado,    setPorEstado]    = useState(MOCK_TOP_ESTADOS);
+  const [porEstado,    setPorEstado]    = useState(MOCK_POR_ESTADO);
   const [distribucion, setDistribucion] = useState(MOCK_DISTRIBUCION);
   const [topEventos,   setTopEventos]   = useState(MOCK_TOP_EVENTOS);
   const [loading,      setLoading]      = useState(false);
@@ -562,17 +571,23 @@ export default function DashboardHistorico() {
     async function fetchAll() {
       setLoading(true);
       setError("");
+
+      // Fetch mapa independiente para que un fallo en otros endpoints no lo afecte
+      fetch(`${API}/stats/por-estado`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => { if (data) setPorEstado(data); })
+        .catch(() => {});
+
       try {
-        const [r1, r2, r3, r4, r5, r6] = await Promise.all([
+        const [r1, r2, r3, r4, r5] = await Promise.all([
           fetch(`${API}/stats/kpis`),
           fetch(`${API}/stats/evolucion-anual`),
           fetch(`${API}/stats/top-estados?limit=10`),
           fetch(`${API}/stats/clasificacion`),
           fetch(`${API}/stats/top-eventos?limit=10`),
-          fetch(`${API}/stats/por-estado`),
         ]);
 
-        if (!r1.ok || !r2.ok || !r3.ok || !r4.ok || !r5.ok || !r6.ok)
+        if (!r1.ok || !r2.ok || !r3.ok || !r4.ok || !r5.ok)
           throw new Error("Error al cargar datos del servidor.");
 
         setKpis(await r1.json());
@@ -580,7 +595,6 @@ export default function DashboardHistorico() {
         setTopEstados(await r3.json());
         setDistribucion(await r4.json());
         setTopEventos(await r5.json());
-        setPorEstado(await r6.json());
       } catch (e) {
         setError(`${e.message} — Mostrando datos de ejemplo.`);
       } finally {
