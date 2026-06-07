@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { predict } from "./api";
+import DashboardHistorico from "./DashboardHistorico";
 
 const tiposPorClasificacion = {
   Geológico: [
@@ -18,6 +19,8 @@ const tiposPorClasificacion = {
 };
 
 export default function App() {
+  const [tab, setTab] = useState("predictor");
+
   const [form, setForm] = useState({
     Año: new Date().getFullYear(),
     Mes: "",
@@ -113,14 +116,42 @@ export default function App() {
     tiposPorClasificacion[form.Clasificación_del_fenómeno] || [];
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#f3f4f6",
-        padding: "40px 20px",
-        fontFamily: "system-ui, Arial",
-      }}
-    >
+    <div style={{ minHeight: "100vh", background: "#f3f4f6", fontFamily: "system-ui, Arial" }}>
+
+      {/* Barra de pestañas */}
+      <div style={{ background: "#ffffff", borderBottom: "1px solid #e5e7eb", padding: "0 20px" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", gap: 4 }}>
+          {[
+            { id: "predictor", label: "Predictor de impacto" },
+            { id: "dashboard", label: "Dashboard histórico" },
+          ].map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              style={{
+                padding: "14px 20px",
+                border: "none",
+                borderBottom: tab === id ? "3px solid #111827" : "3px solid transparent",
+                background: "transparent",
+                fontWeight: tab === id ? 700 : 500,
+                color: tab === id ? "#111827" : "#6b7280",
+                cursor: "pointer",
+                fontSize: 14,
+                transition: "color 0.15s",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Contenido de la pestaña Dashboard */}
+      {tab === "dashboard" && <DashboardHistorico />}
+
+      {/* Contenido de la pestaña Predictor */}
+      {tab === "predictor" && (
+      <div style={{ padding: "40px 20px" }}>
       <div
         style={{
           maxWidth: 1000,
@@ -411,6 +442,8 @@ export default function App() {
           </div>
         )}
       </div>
+      </div>
+      )}
     </div>
   );
 }
