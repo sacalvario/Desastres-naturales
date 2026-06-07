@@ -86,7 +86,13 @@ def _load_stats():
         raw["Defunciones"]                     = pd.to_numeric(raw["Defunciones"],                     errors="coerce")
         raw["Clasificación del fenómeno"]      = raw["Clasificación del fenómeno"].astype(str).str.strip()
         raw["Tipo de fenómeno"]                = raw["Tipo de fenómeno"].astype(str).str.strip()
-        raw["Estado"]                          = raw["Estado"].astype(str).str.strip().str.split(",").str[0].str.strip()
+        raw["Estado"] = raw["Estado"].astype(str).str.strip().str.split(",").str[0].str.strip()
+
+        # Normalizar nombres de estado inconsistentes del Excel
+        STATE_ALIASES = {"CDMX": "Ciudad de México"}
+        NON_STATES    = {"Varios Estados", "Veracruz y Tamaulipas"}
+        raw["Estado"] = raw["Estado"].replace(STATE_ALIASES)
+        raw = raw[~raw["Estado"].isin(NON_STATES)]
 
         stats_df = raw.dropna(subset=[target, "Año"]).copy()
         stats_df = stats_df[stats_df[target] >= 0].copy()
