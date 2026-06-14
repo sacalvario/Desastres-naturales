@@ -12,5 +12,6 @@ export async function predict(payload) {
     throw new Error(`Error HTTP ${res.status}: ${text}`);
   }
 
-  return res.json(); // { predictions: {...} }
+  // { prediction: { "Total de daños (millones de pesos)": x, "Población afectada": y } }
+  return res.json();
 }

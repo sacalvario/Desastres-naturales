@@ -27,8 +27,6 @@ export default function App() {
     Clasificación_del_fenómeno: "",
     Tipo_de_fenómeno: "",
     Estado: "",
-    Impacto_humano: "",
-    Daños_a_infraestructura: "",
   });
 
   const [pred, setPred] = useState(null);
@@ -57,8 +55,6 @@ export default function App() {
       Clasificación_del_fenómeno: "",
       Tipo_de_fenómeno: "",
       Estado: "",
-      Impacto_humano: "",
-      Daños_a_infraestructura: "",
     });
     setPred(null);
     setErr("");
@@ -77,8 +73,6 @@ export default function App() {
         Clasificación_del_fenómeno: form.Clasificación_del_fenómeno,
         Tipo_de_fenómeno: form.Tipo_de_fenómeno,
         Estado: form.Estado,
-        Impacto_humano: Number(form.Impacto_humano),
-        Daños_a_infraestructura: Number(form.Daños_a_infraestructura),
       };
 
       const data = await predict(payload);
@@ -110,7 +104,11 @@ export default function App() {
   };
 
   const monto = pred?.["Total de daños (millones de pesos)"] || 0;
+  const poblacion = pred?.["Población afectada"] || 0;
   const nivel = getNivelImpacto(monto);
+
+  const fmtEntero = (v) =>
+    Number(Math.round(v)).toLocaleString("es-MX", { maximumFractionDigits: 0 });
 
   const tiposDisponibles =
     tiposPorClasificacion[form.Clasificación_del_fenómeno] || [];
@@ -180,8 +178,9 @@ export default function App() {
             fontSize: 16,
           }}
         >
-          Modelo de Machine Learning para estimar daños económicos ocasionados
-          por desastres naturales en México.
+          Modelo de Machine Learning que estima, de forma anticipada, los daños
+          económicos y la población afectada por un desastre natural en México,
+          a partir del tipo de fenómeno, el estado y la fecha.
         </p>
 
         <form onSubmit={onSubmit} style={{ display: "grid", gap: 18 }}>
@@ -320,46 +319,6 @@ export default function App() {
             </select>
           </label>
 
-          <SectionTitle title="Nivel de afectación reportado" />
-
-          <div style={gridStyle}>
-            <label>
-              Población Afectada y Defunciones
-              <select
-                name="Impacto_humano"
-                value={form.Impacto_humano}
-                onChange={onChange}
-                required
-                style={inputStyle}
-              >
-                <option value="">Selecciona categoría</option>
-                <option value="1">0 - 10,000</option>
-                <option value="2">10,001 - 100,000</option>
-                <option value="3">100,001 - 500,000</option>
-                <option value="4">500,001 - 1,000,000</option>
-                <option value="5">Mayor a 1,000,000</option>
-              </select>
-            </label>
-
-            <label>
-              Viviendas, Escuelas, Hospitales y Comercios Afectados
-              <select
-                name="Daños_a_infraestructura"
-                value={form.Daños_a_infraestructura}
-                onChange={onChange}
-                required
-                style={inputStyle}
-              >
-                <option value="">Selecciona categoría</option>
-                <option value="1">0 - 1,000</option>
-                <option value="2">1,001 - 10,000</option>
-                <option value="3">10,001 - 30,000</option>
-                <option value="4">30,001 - 100,000</option>
-                <option value="5">Mayor a 100,000</option>
-              </select>
-            </label>
-          </div>
-
           <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
             <button type="submit" style={buttonStyle} disabled={loading}>
               {loading ? "Calculando..." : "Predecir impacto"}
@@ -381,57 +340,77 @@ export default function App() {
           <div style={{ marginTop: 34 }}>
             <h2 style={{ marginBottom: 14 }}>Resultado estimado</h2>
 
-            <div
-              style={{
-                padding: 24,
-                borderRadius: 18,
-                border: "1px solid #e5e7eb",
-                background: "#fafafa",
-              }}
-            >
-              <p style={{ margin: 0, opacity: 0.7 }}>
-                Total de daños estimado
-              </p>
-
+            <div style={gridStyle}>
+              {/* Daño económico */}
               <div
                 style={{
-                  fontSize: 36,
-                  fontWeight: 800,
-                  marginTop: 6,
+                  padding: 24,
+                  borderRadius: 18,
+                  border: "1px solid #e5e7eb",
+                  background: "#fafafa",
                 }}
               >
-                ${fmt(monto)} millones de pesos
-              </div>
+                <p style={{ margin: 0, opacity: 0.7 }}>
+                  Daño económico estimado
+                </p>
 
-              <div
-                style={{
-                  marginTop: 12,
-                  color: nivel.color,
-                  fontWeight: "bold",
-                  fontSize: 20,
-                }}
-              >
-                Impacto {nivel.texto}
-              </div>
+                <div style={{ fontSize: 32, fontWeight: 800, marginTop: 6 }}>
+                  ${fmt(monto)} <span style={{ fontSize: 16, fontWeight: 600 }}>millones de pesos</span>
+                </div>
 
-              <div
-                style={{
-                  width: "100%",
-                  height: 18,
-                  background: "#e5e7eb",
-                  borderRadius: 20,
-                  overflow: "hidden",
-                  marginTop: 16,
-                }}
-              >
                 <div
                   style={{
-                    width: `${Math.min((monto / 2000) * 100, 100)}%`,
-                    height: "100%",
-                    background: nivel.color,
-                    transition: "width 0.4s ease",
+                    marginTop: 12,
+                    color: nivel.color,
+                    fontWeight: "bold",
+                    fontSize: 20,
                   }}
-                />
+                >
+                  Impacto {nivel.texto}
+                </div>
+
+                <div
+                  style={{
+                    width: "100%",
+                    height: 18,
+                    background: "#e5e7eb",
+                    borderRadius: 20,
+                    overflow: "hidden",
+                    marginTop: 16,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.min((monto / 2000) * 100, 100)}%`,
+                      height: "100%",
+                      background: nivel.color,
+                      transition: "width 0.4s ease",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Población afectada */}
+              <div
+                style={{
+                  padding: 24,
+                  borderRadius: 18,
+                  border: "1px solid #e5e7eb",
+                  background: "#fafafa",
+                }}
+              >
+                <p style={{ margin: 0, opacity: 0.7 }}>
+                  Población afectada estimada
+                </p>
+
+                <div style={{ fontSize: 32, fontWeight: 800, marginTop: 6 }}>
+                  {fmtEntero(poblacion)} <span style={{ fontSize: 16, fontWeight: 600 }}>personas</span>
+                </div>
+
+                <p style={{ marginTop: 12, fontSize: 13, opacity: 0.6 }}>
+                  Número aproximado de personas que podrían verse afectadas por el
+                  evento en el estado seleccionado.
+                </p>
               </div>
             </div>
 

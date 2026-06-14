@@ -1,20 +1,41 @@
 {
-  "inputs": [
-    "Año",
-    "Mes",
+  "mode": "ex-ante",
+  "features": [
     "Clasificación del fenómeno",
     "Tipo de fenómeno",
     "Estado",
-    "Impacto humano",
-    "Daños a infraestructura"
+    "Año",
+    "mes_sin",
+    "mes_cos",
+    "Población estatal"
   ],
-  "target": "Total de daños (millones de pesos)",
-  "rows_used": 3960,
-  "model_type": "ExtraTreesRegressor",
-  "target_transform": "log1p_expm1",
-  "metrics_test": {
-    "MAE": 154.81649111266603,
-    "R2": 0.375800680942602
+  "models": {
+    "danos": {
+      "artifact": "model_danos.joblib",
+      "target": "Total de daños (millones de pesos)",
+      "rows_used": 3958,
+      "metrics_temporal": {
+        "R2_log": 0.1661,
+        "MAE": 209.09,
+        "MedAE": 1.6924,
+        "n_train": 3226,
+        "n_test": 732
+      }
+    },
+    "poblacion": {
+      "artifact": "model_poblacion.joblib",
+      "target": "Población afectada",
+      "rows_used": 3923,
+      "metrics_temporal": {
+        "R2_log": 0.1033,
+        "MAE": 4380.21,
+        "MedAE": 49.6169,
+        "n_train": 3191,
+        "n_test": 732
+      }
+    }
   },
-  "notes": "Modelo de daños económicos usando Año, Mes, Clasificación, Tipo de fenómeno, Estado, Impacto humano y Daños a infraestructura."
+  "model_type": "HistGradientBoostingRegressor",
+  "target_transform": "log1p_expm1",
+  "notes": "Modelos ex-ante: predicen daño económico y población afectada usando solo features conocibles antes del desastre (fenómeno, estado, fecha, población estatal del censo)."
 }
