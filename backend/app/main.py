@@ -6,9 +6,6 @@ import pandas as pd
 import numpy as np
 import joblib
 import json
-import shutil
-import tempfile
-import subprocess
 
 app = FastAPI(title="Impacto Desastres API", version="1.0")
 
@@ -26,81 +23,50 @@ app.add_middleware(
 
 # ── Rutas de artefactos del modelo ──────────────────────────────
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts"
-MODEL_PATH    = ARTIFACTS_DIR / "model.joblib"
-PREP_PATH     = ARTIFACTS_DIR / "preprocessor.joblib"
-META_PATH     = ARTIFACTS_DIR / "metadata.json"
+MODEL_DANOS_PATH = ARTIFACTS_DIR / "model_danos.joblib"
+MODEL_POBL_PATH  = ARTIFACTS_DIR / "model_poblacion.joblib"
+PREP_PATH        = ARTIFACTS_DIR / "preprocessor.joblib"
+POBL_PATH        = ARTIFACTS_DIR / "poblacion_estatal.joblib"
+META_PATH        = ARTIFACTS_DIR / "metadata.json"
+DATA_PATH        = ARTIFACTS_DIR / "data.joblib"
 
-# ── Ruta al Excel de datos históricos ───────────────────────────
-EXCEL_PATH = Path(__file__).resolve().parent.parent.parent / "Base.xlsx"
+# Targets que devuelve el predictor ex-ante
+TARGET_DANOS = "Total de daños (millones de pesos)"
+TARGET_POBL  = "Población afectada"
 
-model        = None
+model_danos  = None
+model_pobl   = None
 preprocessor = None
-target       = "Total de daños (millones de pesos)"
+poblacion    = None     # lookup {(Estado, Año): población estatal}
+target       = TARGET_DANOS
 metadata     = {}
 
-if MODEL_PATH.exists() and PREP_PATH.exists():
-    model        = joblib.load(MODEL_PATH)
+# Features ex-ante en el orden que espera el preprocesador
+FEATURES = ["Clasificación del fenómeno", "Tipo de fenómeno", "Estado",
+            "Año", "mes_sin", "mes_cos", "Población estatal"]
+
+# Normalización de estado: etiquetas del frontend -> nombres del modelo/censo
+STATE_ALIASES = {"CDMX": "Ciudad de México", "Estado de México": "México"}
+
+if MODEL_DANOS_PATH.exists() and PREP_PATH.exists():
+    model_danos  = joblib.load(MODEL_DANOS_PATH)
     preprocessor = joblib.load(PREP_PATH)
+    if MODEL_POBL_PATH.exists():
+        model_pobl = joblib.load(MODEL_POBL_PATH)
+    if POBL_PATH.exists():
+        poblacion = joblib.load(POBL_PATH)
     if META_PATH.exists():
         metadata = json.loads(META_PATH.read_text(encoding="utf-8"))
-        target   = metadata.get("target", target)
 
 # ── Carga de datos históricos para el dashboard ─────────────────
+# El DataFrame ya viene limpio y normalizado desde train_model_simple.py
+# (guardado como data.joblib). No se lee el Excel en runtime.
 stats_df = None
-
-def _copy_excel():
-    """Copia el Excel a un directorio temporal.
-    Usa robocopy como fallback cuando OneDrive/Excel tiene el archivo bloqueado."""
-    tmp_dir  = Path(tempfile.mkdtemp())
-    tmp_file = tmp_dir / EXCEL_PATH.name
-    try:
-        shutil.copy2(EXCEL_PATH, tmp_file)
-        return tmp_file
-    except PermissionError:
-        pass
-    # Fallback: robocopy maneja archivos bloqueados en Windows
-    subprocess.run(
-        ["robocopy", str(EXCEL_PATH.parent), str(tmp_dir), EXCEL_PATH.name, "/R:0", "/W:0"],
-        capture_output=True,
-    )
-    return tmp_file if tmp_file.exists() else None
-
-
-def _load_stats():
-    global stats_df
-    if not EXCEL_PATH.exists():
-        print(f"[stats] Excel no encontrado en {EXCEL_PATH}")
-        return
-    try:
-        tmp = _copy_excel()
-        if tmp is None:
-            print("[stats] No se pudo copiar el Excel (archivo bloqueado).")
-            return
-        raw = pd.read_excel(tmp)
-        tmp.unlink(missing_ok=True)
-        raw.columns = [c.strip() for c in raw.columns]
-
-        raw[target]                            = pd.to_numeric(raw[target],                            errors="coerce")
-        raw["Año"]                             = pd.to_numeric(raw["Año"],                             errors="coerce")
-        raw["Población afectada"]              = pd.to_numeric(raw["Población afectada"],              errors="coerce")
-        raw["Defunciones"]                     = pd.to_numeric(raw["Defunciones"],                     errors="coerce")
-        raw["Clasificación del fenómeno"]      = raw["Clasificación del fenómeno"].astype(str).str.strip()
-        raw["Tipo de fenómeno"]                = raw["Tipo de fenómeno"].astype(str).str.strip()
-        raw["Estado"] = raw["Estado"].astype(str).str.strip().str.split(",").str[0].str.strip()
-
-        # Normalizar nombres de estado inconsistentes del Excel
-        STATE_ALIASES = {"CDMX": "Ciudad de México"}
-        NON_STATES    = {"Varios Estados", "Veracruz y Tamaulipas"}
-        raw["Estado"] = raw["Estado"].replace(STATE_ALIASES)
-        raw = raw[~raw["Estado"].isin(NON_STATES)]
-
-        stats_df = raw.dropna(subset=[target, "Año"]).copy()
-        stats_df = stats_df[stats_df[target] >= 0].copy()
-        print(f"[stats] {len(stats_df)} filas cargadas desde Excel.")
-    except Exception as e:
-        print(f"[stats] Error al cargar Excel: {e}")
-
-_load_stats()
+if DATA_PATH.exists():
+    stats_df = joblib.load(DATA_PATH)
+    print(f"[stats] {len(stats_df)} filas cargadas desde {DATA_PATH.name}.")
+else:
+    print(f"[stats] {DATA_PATH.name} no encontrado. Ejecuta train_model_simple.py para generarlo.")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -115,13 +81,15 @@ def root():
 @app.get("/health")
 def health():
     return {
-        "status":               "ok",
-        "model_loaded":         model is not None,
-        "preprocessor_loaded":  preprocessor is not None,
-        "stats_loaded":         stats_df is not None,
-        "target":               target,
-        "inputs":               metadata.get("inputs"),
-        "metrics_test":         metadata.get("metrics_test"),
+        "status":                  "ok",
+        "model_danos_loaded":      model_danos is not None,
+        "model_poblacion_loaded":  model_pobl is not None,
+        "preprocessor_loaded":     preprocessor is not None,
+        "poblacion_loaded":        poblacion is not None,
+        "stats_loaded":            stats_df is not None,
+        "mode":                    metadata.get("mode"),
+        "features":                metadata.get("features"),
+        "models":                  metadata.get("models"),
     }
 
 
@@ -135,39 +103,56 @@ class PredictRequest(BaseModel):
     Clasificación_del_fenómeno: str
     Tipo_de_fenómeno: str
     Estado: str
-    Impacto_humano: int
-    Daños_a_infraestructura: int
+
+
+def _poblacion_estatal(estado: str, año: int) -> float:
+    """Población del estado para el año dado, desde el lookup del censo.
+    Años fuera de rango se clampan; estado desconocido usa la mediana nacional."""
+    if poblacion is None:
+        return 0.0
+    yr = min(max(año, poblacion["year_min"]), poblacion["year_max"])
+    val = poblacion["by_state_year"].get((estado, yr))
+    if val is None:
+        return poblacion["national_median"]
+    return val
 
 
 @app.post("/predict")
 def predict(req: PredictRequest):
-    if model is None or preprocessor is None:
+    if model_danos is None or preprocessor is None:
         return {
-            "error": "Model o preprocessor no cargados",
-            "hint": "Verifica que model.joblib y preprocessor.joblib estén en backend/app/artifacts/"
+            "error": "Modelos o preprocessor no cargados",
+            "hint": "Ejecuta train_model_simple.py para generar los artifacts en backend/app/artifacts/",
         }
 
-    d   = req.dict()
+    d = req.dict()
+    # Normalizar estado: tomar el primero si vienen varios; aplicar alias.
+    estado = d["Estado"].split(",")[0].strip()
+    estado = STATE_ALIASES.get(estado, estado)
+
+    mes = d["Mes"]
     row = {
-        "Año":                       d["Año"],
-        "Mes":                       d["Mes"],
         "Clasificación del fenómeno": d["Clasificación_del_fenómeno"],
         "Tipo de fenómeno":           d["Tipo_de_fenómeno"],
-        "Estado":                    d["Estado"].split(",")[0].strip(),
-        "Impacto humano":            d["Impacto_humano"],
-        "Daños a infraestructura":   d["Daños_a_infraestructura"],
+        "Estado":                     estado,
+        "Año":                        d["Año"],
+        "mes_sin":                    np.sin(2 * np.pi * mes / 12),
+        "mes_cos":                    np.cos(2 * np.pi * mes / 12),
+        "Población estatal":          _poblacion_estatal(estado, d["Año"]),
     }
 
-    df       = pd.DataFrame([row])
-    X        = preprocessor.transform(df)
+    X = preprocessor.transform(pd.DataFrame([row])[FEATURES])
     if hasattr(X, "toarray"):
         X = X.toarray()
 
-    pred_log   = model.predict(X)
-    pred       = np.expm1(pred_log)
-    prediction = float(max(pred[0], 0))
+    danos = float(max(np.expm1(model_danos.predict(X))[0], 0))
+    prediction = {TARGET_DANOS: danos}
 
-    return {"prediction": {target: prediction}}
+    if model_pobl is not None:
+        pobl = float(max(np.expm1(model_pobl.predict(X))[0], 0))
+        prediction[TARGET_POBL] = pobl
+
+    return {"prediction": prediction}
 
 
 # ════════════════════════════════════════════════════════════════
