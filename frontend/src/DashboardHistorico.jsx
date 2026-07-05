@@ -288,13 +288,13 @@ function BarChart({ data }) {
 function DonutChart({ data }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   const cx = 90, cy = 90, r = 72, ir = 42;
-  let angle = -Math.PI / 2;
+  const START = -Math.PI / 2;
+  const spans = data.map((d) => (d.value / total) * 2 * Math.PI);
 
-  const slices = data.map((d) => {
-    const start = angle;
-    const span  = (d.value / total) * 2 * Math.PI;
-    angle      += span;
-    const end   = angle;
+  const slices = data.map((d, i) => {
+    const start = START + spans.slice(0, i).reduce((a, v) => a + v, 0);
+    const span  = spans[i];
+    const end   = start + span;
     const large = span > Math.PI ? 1 : 0;
     const c = (a) => Math.cos(a), s = (a) => Math.sin(a);
     const f = (n) => n.toFixed(2);
@@ -562,58 +562,42 @@ export default function DashboardHistorico() {
   const [porEstado,    setPorEstado]    = useState(MOCK_POR_ESTADO);
   const [distribucion, setDistribucion] = useState(MOCK_DISTRIBUCION);
   const [topEventos,   setTopEventos]   = useState(MOCK_TOP_EVENTOS);
-  const [loading,      setLoading]      = useState(false);
+  const [loadingMap,   setLoadingMap]   = useState(true);
   const [error,        setError]        = useState("");
 
   useEffect(() => {
     const API = import.meta.env.VITE_API_URL;
 
-    async function fetchAll() {
-      setLoading(true);
-      setError("");
+    // Cada sección carga y actualiza de forma independiente
+    fetch(`${API}/stats/por-estado`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setPorEstado(data); })
+      .catch(() => {})
+      .finally(() => setLoadingMap(false));
 
-      // Fetch mapa independiente para que un fallo en otros endpoints no lo afecte
-      fetch(`${API}/stats/por-estado`)
-        .then((r) => r.ok ? r.json() : null)
-        .then((data) => { if (data) setPorEstado(data); })
-        .catch(() => {});
-
-      try {
-        const [r1, r2, r3, r4, r5] = await Promise.all([
-          fetch(`${API}/stats/kpis`),
-          fetch(`${API}/stats/evolucion-anual`),
-          fetch(`${API}/stats/top-estados?limit=10`),
-          fetch(`${API}/stats/clasificacion`),
-          fetch(`${API}/stats/top-eventos?limit=10`),
-        ]);
-
+    Promise.all([
+      fetch(`${API}/stats/kpis`),
+      fetch(`${API}/stats/evolucion-anual`),
+      fetch(`${API}/stats/top-estados?limit=10`),
+      fetch(`${API}/stats/clasificacion`),
+      fetch(`${API}/stats/top-eventos?limit=10`),
+    ])
+      .then(([r1, r2, r3, r4, r5]) => {
         if (!r1.ok || !r2.ok || !r3.ok || !r4.ok || !r5.ok)
           throw new Error("Error al cargar datos del servidor.");
-
-        setKpis(await r1.json());
-        setEvolucion(await r2.json());
-        setTopEstados(await r3.json());
-        setDistribucion(await r4.json());
-        setTopEventos(await r5.json());
-      } catch (e) {
-        setError(`${e.message} — Mostrando datos de ejemplo.`);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchAll();
+        return Promise.all([r1.json(), r2.json(), r3.json(), r4.json(), r5.json()]);
+      })
+      .then(([d1, d2, d3, d4, d5]) => {
+        setKpis(d1);
+        setEvolucion(d2);
+        setTopEstados(d3);
+        setDistribucion(d4);
+        setTopEventos(d5);
+      })
+      .catch((e) => setError(`${e.message} — Mostrando datos de ejemplo.`));
   }, []);
 
   const fmtNum = (v) => Number(v).toLocaleString("es-MX", { maximumFractionDigits: 0 });
-
-  if (loading) {
-    return (
-      <div style={{ textAlign: "center", padding: 80, color: "#6b7280", fontFamily: "system-ui" }}>
-        Cargando datos históricos…
-      </div>
-    );
-  }
 
   return (
     <div
@@ -705,7 +689,9 @@ export default function DashboardHistorico() {
 
         {/* ── ROW 5: Mapa completo — todos los estados ─────────── */}
         <Card title="Distribución geográfica (México)">
-          <MapaMexico data={porEstado} />
+          {loadingMap
+            ? <div style={{ textAlign: "center", padding: 40, color: "#9ca3af", fontSize: 13 }}>Cargando mapa…</div>
+            : <MapaMexico data={porEstado} />}
         </Card>
 
       </div>
