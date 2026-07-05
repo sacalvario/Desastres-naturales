@@ -1,11 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from pathlib import Path
 import pandas as pd
 import numpy as np
 import joblib
 import json
+
+STATS_CACHE = "public, max-age=3600"
 
 app = FastAPI(title="Impacto Desastres API", version="1.0")
 
@@ -171,12 +174,15 @@ def stats_kpis():
 
     total_pob = int(stats_df["Población afectada"].fillna(0).sum())
 
-    return {
-        "total_eventos":      int(len(stats_df)),
-        "total_daños":        round(float(stats_df[target].sum()), 2),
-        "poblacion_afectada": total_pob,
-        "estados_afectados":  int(stats_df["Estado"].nunique()),
-    }
+    return JSONResponse(
+        content={
+            "total_eventos":      int(len(stats_df)),
+            "total_daños":        round(float(stats_df[target].sum()), 2),
+            "poblacion_afectada": total_pob,
+            "estados_afectados":  int(stats_df["Estado"].nunique()),
+        },
+        headers={"Cache-Control": STATS_CACHE},
+    )
 
 
 @app.get("/stats/evolucion-anual")
@@ -192,10 +198,13 @@ def stats_evolucion():
         .reset_index()
         .sort_values("Año")
     )
-    return [
-        {"año": int(r["Año"]), "daños": round(float(r[target]), 2)}
-        for _, r in df.iterrows()
-    ]
+    return JSONResponse(
+        content=[
+            {"año": int(r["Año"]), "daños": round(float(r[target]), 2)}
+            for _, r in df.iterrows()
+        ],
+        headers={"Cache-Control": STATS_CACHE},
+    )
 
 
 @app.get("/stats/top-estados")
@@ -212,10 +221,13 @@ def stats_top_estados(limit: int = 10):
         .sort_values(target, ascending=False)
         .head(limit)
     )
-    return [
-        {"estado": r["Estado"], "daños": round(float(r[target]), 2)}
-        for _, r in df.iterrows()
-    ]
+    return JSONResponse(
+        content=[
+            {"estado": r["Estado"], "daños": round(float(r[target]), 2)}
+            for _, r in df.iterrows()
+        ],
+        headers={"Cache-Control": STATS_CACHE},
+    )
 
 
 @app.get("/stats/por-estado")
@@ -234,15 +246,18 @@ def stats_por_estado():
         )
         .reset_index()
     )
-    return [
-        {
-            "estado":         r["Estado"],
-            "daños":          round(float(r["daños"]),     2),
-            "poblacion":      int(r["poblacion"]),
-            "total_eventos":  int(r["total_eventos"]),
-        }
-        for _, r in df.iterrows()
-    ]
+    return JSONResponse(
+        content=[
+            {
+                "estado":         r["Estado"],
+                "daños":          round(float(r["daños"]),     2),
+                "poblacion":      int(r["poblacion"]),
+                "total_eventos":  int(r["total_eventos"]),
+            }
+            for _, r in df.iterrows()
+        ],
+        headers={"Cache-Control": STATS_CACHE},
+    )
 
 
 @app.get("/stats/clasificacion")
@@ -255,14 +270,17 @@ def stats_clasificacion():
     counts = stats_df[col].value_counts()
     colors = {"Hidrometeorológico": "#3b82f6", "Geológico": "#f97316"}
 
-    return [
-        {
-            "label": str(k),
-            "value": int(v),
-            "color": colors.get(str(k), "#6b7280"),
-        }
-        for k, v in counts.items()
-    ]
+    return JSONResponse(
+        content=[
+            {
+                "label": str(k),
+                "value": int(v),
+                "color": colors.get(str(k), "#6b7280"),
+            }
+            for k, v in counts.items()
+        ],
+        headers={"Cache-Control": STATS_CACHE},
+    )
 
 
 @app.get("/stats/top-eventos")
@@ -272,12 +290,15 @@ def stats_top_eventos(limit: int = 10):
         return _no_data()
 
     df = stats_df.sort_values(target, ascending=False).head(limit)
-    return [
-        {
-            "año":    int(r["Año"]),
-            "estado": r["Estado"],
-            "tipo":   r["Tipo de fenómeno"],
-            "daños":  round(float(r[target]), 2),
-        }
-        for _, r in df.iterrows()
-    ]
+    return JSONResponse(
+        content=[
+            {
+                "año":    int(r["Año"]),
+                "estado": r["Estado"],
+                "tipo":   r["Tipo de fenómeno"],
+                "daños":  round(float(r[target]), 2),
+            }
+            for _, r in df.iterrows()
+        ],
+        headers={"Cache-Control": STATS_CACHE},
+    )
