@@ -195,9 +195,31 @@ su flag en `/health` y su renderizado en el frontend.
   No es degradación del modelo: desaparecen los eventos térmicos, que son fáciles de predecir
   e inflaban la cifra. Sobre los mismos eventos de prueba, el rediseño mejora de 0.1101 a
   0.1272.
-- **El modelo deja de ser ex-ante puro.** Al introducir la intensidad, el usuario aporta
-  información que solo existe cuando el fenómeno ya fue medido. El predictor pasa a responder
-  "dado un evento de esta intensidad, ¿cuánto daño?", que sirve para simular escenarios pero
-  debe presentarse como tal.
+- **El modelo deja de ser ex-ante puro.** El proyecto conserva el nombre "ex-ante", que sigue
+  siendo correcto respecto al daño, pero con la aclaración de la sección siguiente.
 - El dashboard queda restringido a los mismos dos tipos, por decisión de coherencia del
   proyecto. Eso saca del panel histórico los eventos geológicos, incluidos los sismos de 2017.
+
+## Qué significa "ex-ante" a partir de este rediseño
+
+El proyecto conserva el nombre, porque el modelo sigue sin ver ninguna consecuencia del daño.
+Pero "ex-ante" deja de ser una sola cosa: las variables se reparten en tres niveles, y cada una
+está en un sitio distinto.
+
+| nivel | variables | por qué |
+|---|---|---|
+| **Fuga** | `Daños a infraestructura`, `Impacto humano` | Son componentes del objetivo. Conocerlas equivale a conocer parte de la respuesta. Excluidas. |
+| **Ex-ante respecto al daño** | categoría de ciclón, derivada de `WMO_WIND` | Causa física, no consecuencia. El viento máximo sostenido se pronostica 24-72 horas antes de que el ciclón toque tierra, que es justo cuando la estimación sirve para algo. |
+| **Contemporánea al daño** | categoría de lluvia, derivada de `mm_CHIRPS` | Causa física, tampoco consecuencia, pero es el acumulado de la ventana `[Fecha de Inicio, Fecha de Fin]`: se mide cuando el evento terminó. Y el 79.1 % de las lluvias duran un solo día, así que la lluvia y el daño ocurren en la misma ventana. |
+
+La distinción no es retórica: la primera categoría invalidaría el modelo, la segunda permite
+predecir de verdad y la tercera solo permite explicar o simular escenarios.
+
+Las métricas apuntan en el mismo sentido. El modelo cuya variable de intensidad es genuinamente
+anticipatoria —ciclones— supera su línea base (+0.0467 frente a -0.0110); el de lluvias, cuya
+intensidad es contemporánea, no la supera (-0.1376 frente a -0.0671).
+
+Consecuencia práctica para quien use el predictor: pedirle la intensidad al usuario cambia el
+caso de uso. Con ciclones sirve para anticipar un evento pronosticado; con lluvias sirve para
+estimar el costo de un episodio ya ocurrido o para simular uno hipotético, no para planeación a
+meses vista.
