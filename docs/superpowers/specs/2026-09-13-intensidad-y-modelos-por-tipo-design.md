@@ -1,7 +1,7 @@
 # Rediseño del predictor: intensidad del evento y modelos por tipo
 
 **Fecha:** 2026-09-13
-**Estado:** aprobado, pendiente de implementación
+**Estado:** implementado en `bad9d3f` y `faa01e3`
 
 ## Por qué
 
@@ -126,11 +126,30 @@ completa y su propio preprocesador ajustado sobre sus propias filas.
 
 | modelo | filas | features |
 |---|---|---|
-| lluvias | 2 441 | Estado (one-hot) · Año · mes_sin · mes_cos · Población estatal · intensidad |
-| ciclones | 242 | Estado (one-hot) · Año · mes_sin · mes_cos · Población estatal · intensidad · WMO_PRES |
+| lluvias | 2 433 | Estado (one-hot) · intensidad |
+| ciclones | 241 | Estado (one-hot) · intensidad |
 
 Medido con validación de cinco cortes temporales: dos modelos dan R² medio **0.1455** frente a
 **0.1272** del modelo único.
+
+### Las demás variables quedaron fuera, y eso se midió
+
+El juego de features se redujo al mínimo porque lo demás resultó ser ruido. Con año, mes y
+población estatal dentro, el R² medio de lluvias era **-0.4567** y el de ciclones **-0.0607**;
+quitándolos suben a **-0.0739** y **+0.0771**. `WMO_PRES` se descartó por lo mismo: hunde
+ciclones de +0.0771 a **-0.0298**, pese a correlacionar con el daño por sí sola, porque está muy
+ligada al viento que ya entra vía la intensidad.
+
+Resultado final, con estado e intensidad como únicas features:
+
+| modelo | R² medio | línea base del tipo |
+|---|---|---|
+| ciclones | **+0.0467** | -0.0110 |
+| lluvias | -0.1376 | -0.0671 |
+
+El de ciclones es el primer modelo del proyecto que supera a la regla trivial. El de lluvias no
+lo consigue, y `metadata.json` lo reporta con su línea base al lado para que la comparación esté
+siempre a la vista.
 
 Cada modelo guarda su preprocesador junto a él. El diseño actual ajusta dos preprocesadores y
 descarta el de población, sirviendo ambos modelos con uno solo; hoy funciona porque las
@@ -145,19 +164,20 @@ comportamiento sea coherente aunque su precisión sea baja.
 
 ## API
 
-`POST /predict` acepta dos campos nuevos y devuelve una sola métrica:
+`POST /predict` acepta la intensidad y devuelve una sola métrica:
 
 ```
 { "Año", "Mes", "Tipo_de_fenómeno", "Estado",
-  "intensidad": "Huracán categoría 3",
-  "WMO_PRES": 960 }
+  "intensidad": "Huracán categoría 3" }
 
 → { "prediction": { "Total de daños (millones de pesos)": 1234.5 },
-    "modelo": "ciclones" }
+    "modelo": "Ciclones",
+    "intensidad_usada": "Huracán categoría 3" }
 ```
 
 - `Clasificación_del_fenómeno` desaparece de la entrada: era constante.
-- `WMO_PRES` es opcional y solo se usa en el modelo de ciclones.
+- `intensidad` es opcional; sin ella se predice con la categoría `Desconocida`.
+- Los errores responden 503 (tipo sin modelo) y 422 (intensidad inválida), no HTTP 200.
 - Desaparece `"Población afectada"` de la respuesta.
 - `GET /intensidades` nuevo: devuelve las categorías válidas por tipo, para que el frontend no
   las lleve escritas a mano.
@@ -167,7 +187,6 @@ comportamiento sea coherente aunque su precisión sea baja.
 
 - El selector de intensidad se muestra condicionado al tipo elegido, con las opciones que
   devuelve `GET /intensidades`.
-- El campo de presión aparece solo para ciclones.
 - El selector de tipo de fenómeno se reduce a Lluvias e Inundaciones y Ciclones.
 - Se elimina la entrada `"Población afectada"` del registro `ESCALAS` de `App.jsx`: las
   tarjetas se generan a partir de la respuesta, pero el esqueleto de la primera carga sale de
