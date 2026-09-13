@@ -1,41 +1,74 @@
 {
-  "mode": "ex-ante",
-  "features": [
-    "Clasificación del fenómeno",
-    "Tipo de fenómeno",
-    "Estado",
-    "Año",
-    "mes_sin",
-    "mes_cos",
-    "Población estatal"
-  ],
-  "models": {
-    "danos": {
-      "artifact": "model_danos.joblib",
-      "target": "Total de daños (millones de pesos)",
-      "rows_used": 3958,
-      "metrics_temporal": {
-        "R2_log": 0.1661,
-        "MAE": 209.09,
-        "MedAE": 1.6924,
-        "n_train": 3226,
-        "n_test": 732
-      }
-    },
-    "poblacion": {
-      "artifact": "model_poblacion.joblib",
-      "target": "Población afectada",
-      "rows_used": 3923,
-      "metrics_temporal": {
-        "R2_log": 0.1033,
-        "MAE": 4380.21,
-        "MedAE": 49.6169,
-        "n_train": 3191,
-        "n_test": 732
-      }
-    }
-  },
+  "mode": "intensidad-por-tipo",
+  "target": "Total de daños (millones de pesos)",
   "model_type": "HistGradientBoostingRegressor",
   "target_transform": "log1p_expm1",
-  "notes": "Modelos ex-ante: predicen daño económico y población afectada usando solo features conocibles antes del desastre (fenómeno, estado, fecha, población estatal del censo)."
+  "cortes_lluvia_mm": [
+    4.471,
+    13.5424
+  ],
+  "models": {
+    "lluvias": {
+      "artifact": "model_lluvias.joblib",
+      "preprocessor": "preprocessor_lluvias.joblib",
+      "features": [
+        "Estado",
+        "intensidad"
+      ],
+      "rows_used": 2433,
+      "metrics_temporal": {
+        "R2_log_medio": -0.1376,
+        "R2_log_peor": -0.5063,
+        "R2_log_por_corte": [
+          -0.0239,
+          -0.0264,
+          -0.0553,
+          -0.076,
+          -0.5063
+        ],
+        "MAE_medio": 55.24,
+        "R2_linea_base_media_del_tipo": -0.0671,
+        "cortes": [
+          2017,
+          2018,
+          2019,
+          2020,
+          2021
+        ],
+        "n_filas": 2433
+      }
+    },
+    "ciclones": {
+      "artifact": "model_ciclones.joblib",
+      "preprocessor": "preprocessor_ciclones.joblib",
+      "features": [
+        "Estado",
+        "intensidad"
+      ],
+      "rows_used": 241,
+      "metrics_temporal": {
+        "R2_log_medio": 0.0467,
+        "R2_log_peor": -0.031,
+        "R2_log_por_corte": [
+          0.0356,
+          0.0264,
+          0.0831,
+          0.1193,
+          -0.031
+        ],
+        "MAE_medio": 2139.43,
+        "R2_linea_base_media_del_tipo": -0.011,
+        "cortes": [
+          2017,
+          2018,
+          2019,
+          2020,
+          2021
+        ],
+        "n_filas": 241
+      },
+      "advertencia": "Entrenado con pocas filas: la métrica tiene un intervalo amplio y debe reportarse con cautela."
+    }
+  },
+  "notes": "Un modelo por tipo de fenómeno. La intensidad entra como ordinal con restricción de monotonía, de modo que un evento más intenso nunca prediga menos daño. R2_linea_base_media_del_tipo es la referencia a batir: predecir el promedio histórico del tipo de fenómeno. El modelo deja de ser ex-ante puro, ya que la intensidad solo se conoce una vez medido el fenómeno."
 }
