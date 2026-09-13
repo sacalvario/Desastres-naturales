@@ -1,24 +1,18 @@
 import { useEffect, useState } from "react";
 import PropTypes from "prop-types";
 
-import { predict } from "./api";
+import { intensidades, predict } from "./api";
 import DashboardHistorico from "./DashboardHistorico";
 
-const tiposPorClasificacion = {
-  Geológico: [
-    "Actividad Volcánica",
-    "Sismos",
-    "Movimientos de Masa",
-  ],
-  Hidrometeorológico: [
-    "Sequía",
-    "Ciclones",
-    "Frío Extremo",
-    "Lluvias e Inundaciones",
-    "Viento Extremo",
-    "Calor Extremo",
-  ],
-};
+// El predictor cubre los dos fenómenos para los que existe una medida física de
+// intensidad: lluvia acumulada para las inundaciones y viento sostenido para los
+// ciclones. El modelo se entrena solo con ellos, así que ofrecer más tipos en el
+// formulario prometería predicciones que el backend rechaza con un 503.
+//
+// La clasificación del fenómeno desapareció del formulario: en este dataset todos
+// los eventos son hidrometeorológicos, de modo que era un campo con una sola
+// respuesta posible.
+const TIPOS = ["Lluvias e Inundaciones", "Ciclones"];
 
 // ============================================================
 // Escalas de impacto
@@ -37,7 +31,7 @@ const tiposPorClasificacion = {
 // predicciones quedarían pegadas al extremo izquierdo, indistinguibles entre
 // sí. Es el mismo motivo por el que los modelos entrenan sobre log1p.
 //
-// Los cortes, el techo y la rejilla `ecdf` salen de los 3,958 eventos de
+// Los cortes, el techo y la rejilla `ecdf` salen de los 2,674 eventos de
 // backend/app/artifacts/data.joblib (2000-2023). Son una foto del dataset: si
 // se reentrena con datos nuevos, hay que recalcularlos.
 //
@@ -62,10 +56,10 @@ const ESCALAS = {
     unidad: "millones de pesos",
     prefijo: "$",
     formato: "moneda",
-    nEventos: "3,958",
+    nEventos: "2,674",
     textoCero: "Sin daños económicos estimados",
     notaCero:
-      "1,065 de los 3,958 eventos registrados tampoco reportaron daño económico.",
+      "472 de los 2,674 eventos registrados tampoco reportaron daño económico.",
     nota: "Costo directo estimado del evento en el estado seleccionado.",
     bandas: [
       { hasta: 100, posicion: 0.4, nivel: NIVELES.bajo },
@@ -76,43 +70,13 @@ const ESCALAS = {
       { posicion: 0.4, etiqueta: "$100 M" },
       { posicion: 0.7, etiqueta: "$500 M" },
     ],
-    // P(daño <= x) sobre los 3,958 eventos, en por ciento.
+    // P(daño <= x) sobre los 2,674 eventos, en por ciento.
     ecdf: [
-      [0, 26.91], [0.001, 27.19], [0.01, 30.67], [0.1, 45.5], [0.5, 59.22],
-      [1, 64.07], [5, 74.43], [10, 79.03], [25, 83.78], [50, 87.01],
-      [100, 89.46], [250, 93.2], [500, 95.53], [1000, 97.5], [2500, 99.07],
-      [5000, 99.49], [10000, 99.7], [25000, 99.92], [50000, 99.97],
+      [0, 17.65], [0.001, 17.76], [0.01, 21.28], [0.1, 40.2], [0.5, 57.7],
+      [1, 63.8], [5, 74.61], [10, 79.13], [25, 83.4], [50, 85.83],
+      [100, 87.85], [250, 91.88], [500, 94.5], [1000, 97.08], [2500, 98.92],
+      [5000, 99.44], [10000, 99.63], [25000, 99.93], [50000, 99.96],
       [84207.02, 100],
-    ],
-  },
-
-  "Población afectada": {
-    etiqueta: "Población afectada estimada",
-    unidad: "personas",
-    prefijo: "",
-    formato: "entero",
-    nEventos: "3,916",
-    textoCero: "Sin población afectada estimada",
-    notaCero:
-      "461 de los 3,916 eventos registrados tampoco reportaron población afectada.",
-    nota: "Personas que podrían verse afectadas en el estado seleccionado.",
-    // Cortes elegidos para que caigan en el mismo percentil que los del daño
-    // (10 mil = p89.9 frente a 100 M = p89.5; 30 mil = p95.0 frente a 500 M =
-    // p95.5), de modo que "Impacto Alto" signifique lo mismo en ambas tarjetas.
-    bandas: [
-      { hasta: 10000, posicion: 0.4, nivel: NIVELES.bajo },
-      { hasta: 30000, posicion: 0.7, nivel: NIVELES.medio },
-      { hasta: 4050452, posicion: 1, nivel: NIVELES.alto },
-    ],
-    marcas: [
-      { posicion: 0.4, etiqueta: "10 mil" },
-      { posicion: 0.7, etiqueta: "30 mil" },
-    ],
-    ecdf: [
-      [0, 11.77], [10, 32.15], [50, 44.77], [100, 52.32], [500, 70.91],
-      [1000, 76.71], [5000, 86.34], [10000, 89.86], [30000, 94.97],
-      [50000, 96.71], [100000, 98.01], [250000, 98.95], [500000, 99.34],
-      [1000000, 99.72], [2000000, 99.9], [4050452, 100],
     ],
   },
 };
@@ -226,10 +190,13 @@ export default function App() {
   const [form, setForm] = useState({
     Año: new Date().getFullYear(),
     Mes: "",
-    Clasificación_del_fenómeno: "",
     Tipo_de_fenómeno: "",
     Estado: "",
+    intensidad: "",
   });
+
+  // Catálogo de intensidades por tipo, servido por GET /intensidades.
+  const [catalogoIntensidad, setCatalogoIntensidad] = useState({});
 
   const [pred, setPred] = useState(null);
   const [err, setErr] = useState("");
@@ -252,6 +219,24 @@ export default function App() {
     Object.keys(ESCALAS),
   );
 
+  // Las categorías de intensidad vienen del backend: los cortes de lluvia son
+  // cuantiles del entrenamiento y cambian si se reentrena. Si la petición falla,
+  // el selector queda vacío y la predicción sigue funcionando como "Desconocida",
+  // así que no se interrumpe al usuario con un error por esto.
+  useEffect(() => {
+    let vigente = true;
+    intensidades()
+      .then((tipos) => {
+        if (vigente) setCatalogoIntensidad(tipos);
+      })
+      .catch(() => {
+        if (vigente) setCatalogoIntensidad({});
+      });
+    return () => {
+      vigente = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (!loading) return undefined;
 
@@ -265,12 +250,10 @@ export default function App() {
   const onChange = (e) => {
     const { name, value } = e.target;
 
-    if (name === "Clasificación_del_fenómeno") {
-      setForm({
-        ...form,
-        Clasificación_del_fenómeno: value,
-        Tipo_de_fenómeno: "",
-      });
+    // Cada tipo tiene su propia escala de intensidad, así que al cambiar de tipo
+    // la categoría elegida deja de ser válida.
+    if (name === "Tipo_de_fenómeno") {
+      setForm({ ...form, Tipo_de_fenómeno: value, intensidad: "" });
       return;
     }
 
@@ -281,9 +264,9 @@ export default function App() {
     setForm({
       Año: new Date().getFullYear(),
       Mes: "",
-      Clasificación_del_fenómeno: "",
       Tipo_de_fenómeno: "",
       Estado: "",
+      intensidad: "",
     });
     setPred(null);
     setErr("");
@@ -303,9 +286,10 @@ export default function App() {
       const payload = {
         Año: Number(form.Año),
         Mes: Number(form.Mes),
-        Clasificación_del_fenómeno: form.Clasificación_del_fenómeno,
         Tipo_de_fenómeno: form.Tipo_de_fenómeno,
         Estado: form.Estado,
+        // Sin categoría elegida, el backend usa "Desconocida".
+        intensidad: form.intensidad || null,
       };
 
       const data = await predict(payload);
@@ -334,8 +318,7 @@ export default function App() {
       ? "Consultando el modelo…"
       : "Consultando el modelo… puede tardar si el servidor llevaba rato inactivo.";
 
-  const tiposDisponibles =
-    tiposPorClasificacion[form.Clasificación_del_fenómeno] || [];
+  const opcionesIntensidad = catalogoIntensidad[form.Tipo_de_fenómeno] ?? [];
 
   return (
     <div style={{ minHeight: "100vh", background: "#f3f4f6", fontFamily: "system-ui, Arial" }}>
@@ -403,9 +386,10 @@ export default function App() {
             fontSize: 16,
           }}
         >
-          Modelo de Machine Learning que estima, de forma anticipada, los daños
-          económicos y la población afectada por un desastre natural en México,
-          a partir del tipo de fenómeno, el estado y la fecha.
+          Modelo de Machine Learning que estima el daño económico de un desastre
+          natural en México a partir del tipo de fenómeno, su intensidad y el
+          estado. Al indicar la intensidad se responde a un escenario concreto:
+          cuánto costaría un evento de esa fuerza en ese lugar.
         </p>
 
         <form onSubmit={onSubmit} style={{ display: "grid", gap: 18 }}>
@@ -452,47 +436,43 @@ export default function App() {
 
           <div style={gridStyle}>
             <label>
-              Clasificación del fenómeno
-              <select
-                name="Clasificación_del_fenómeno"
-                value={form.Clasificación_del_fenómeno}
-                onChange={onChange}
-                required
-                style={inputStyle}
-              >
-                <option value="">Selecciona clasificación</option>
-                <option value="Geológico">Geológico</option>
-                <option value="Hidrometeorológico">Hidrometeorológico</option>
-              </select>
-            </label>
-
-            <label>
               Tipo de fenómeno
               <select
                 name="Tipo_de_fenómeno"
                 value={form.Tipo_de_fenómeno}
                 onChange={onChange}
                 required
-                disabled={!form.Clasificación_del_fenómeno}
+                style={inputStyle}
+              >
+                <option value="">Selecciona tipo de fenómeno</option>
+                {TIPOS.map((tipo) => (
+                  <option key={tipo} value={tipo}>
+                    {tipo}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Intensidad del evento
+              <select
+                name="intensidad"
+                value={form.intensidad}
+                onChange={onChange}
+                disabled={!form.Tipo_de_fenómeno}
                 style={{
                   ...inputStyle,
-                  background: !form.Clasificación_del_fenómeno
-                    ? "#f3f4f6"
-                    : "white",
-                  cursor: !form.Clasificación_del_fenómeno
-                    ? "not-allowed"
-                    : "pointer",
+                  background: !form.Tipo_de_fenómeno ? "#f3f4f6" : "white",
+                  cursor: !form.Tipo_de_fenómeno ? "not-allowed" : "pointer",
                 }}
               >
                 <option value="">
-                  {form.Clasificación_del_fenómeno
-                    ? "Selecciona tipo de fenómeno"
-                    : ""}
+                  {form.Tipo_de_fenómeno ? "Selecciona intensidad" : ""}
                 </option>
 
-                {tiposDisponibles.map((tipo) => (
-                  <option key={tipo} value={tipo}>
-                    {tipo}
+                {opcionesIntensidad.map((opcion) => (
+                  <option key={opcion.etiqueta} value={opcion.etiqueta}>
+                    {opcion.etiqueta} ({opcion.rango})
                   </option>
                 ))}
               </select>
