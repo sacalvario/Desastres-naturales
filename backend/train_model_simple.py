@@ -74,6 +74,19 @@ NUM_POR_TIPO = {TIPO_LLUVIAS: [], TIPO_CICLONES: []}
 # proyecto oscila entre 0.01 y 0.24 según dónde se corte.
 CORTES = (2017, 2018, 2019, 2020, 2021)
 
+# Columnas de conteo que el dashboard agrega. No entran al modelo, pero viajan en
+# `data.joblib` y la API las suma, así que tienen que salir de aquí ya numéricas.
+COLUMNAS_CONTEO = (
+    "Defunciones",
+    "Población afectada",
+    "Viviendas dañadas",
+    "Escuelas",
+    "Hospitales",
+    "Comercios",
+    "Area de cultivo dañada / pastizales (h)",
+    "Duración días",
+)
+
 CENSUS_TO_BASE = {
     "Coahuila de Zaragoza": "Coahuila",
     "Michoacán de Ocampo": "Michoacán",
@@ -104,6 +117,21 @@ def _read_excel_safe(path, **kwargs):
         return pd.read_excel(tmp_file, **kwargs)
     finally:
         tmp_file.unlink(missing_ok=True)
+
+
+def _limpia_numero(serie):
+    """Prepara una columna de conteo para `to_numeric`.
+
+    Recupera los números escritos a mano en el Excel —separadores de miles con coma o con
+    espacio, saltos de línea sueltos— en vez de descartarlos como no convertibles. Lo que
+    sigue sin ser un número ('SD', 'sd', 'NSR') queda para que `to_numeric` lo anule.
+    """
+    return (
+        serie.astype(str)
+        .str.replace(r"[\s ]", "", regex=True)
+        .str.replace(",", "", regex=False)
+        .replace({"": None, "nan": None, "None": None})
+    )
 
 
 def load_population_table():
@@ -146,6 +174,14 @@ def clean_base():
     df[TARGET] = pd.to_numeric(df[TARGET], errors="coerce")
     for c in ("mm_CHIRPS", "WMO_WIND", "WMO_PRES"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # Las columnas de conteo no las usa el modelo, pero sí el dashboard, que las suma. En el
+    # Excel llegan como texto con 'SD'/'sd'/'NSR' mezclados y con números escritos a mano
+    # ('19 362 ', ' 13,637.00 \n'), así que hay que limpiarlas aquí: `data.joblib` es lo que
+    # consume la API, y un `.sum()` sobre una columna con texto revienta el endpoint entero.
+    for c in COLUMNAS_CONTEO:
+        if c in df.columns:
+            df[c] = pd.to_numeric(_limpia_numero(df[c]), errors="coerce")
 
     df = df[df["Tipo de fenómeno"].isin(TIPOS)].copy()
 
