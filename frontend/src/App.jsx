@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import PropTypes from "prop-types";
+
 import { predict } from "./api";
 import DashboardHistorico from "./DashboardHistorico";
 
@@ -18,6 +20,206 @@ const tiposPorClasificacion = {
   ],
 };
 
+// ============================================================
+// Escalas de impacto
+// ------------------------------------------------------------
+// La barra del resultado no es un porcentaje arbitrario: es una escala con los
+// cortes de banda clavados SIEMPRE en la misma marca del riel (40% y 70%). Por
+// construcción, el color y el llenado ya no pueden contradecirse: si el texto
+// dice "Alto", la barra está pasada del 70%. Antes no era así — el ancho salía
+// de min(monto / 2000, 1) mientras los cortes estaban en 100 y 500, así que un
+// evento de 500 M se pintaba de rojo "Impacto Alto" con la barra al 25%, y
+// cruzar de Bajo a Medio (99 -> 100) movía la barra 0.05%.
+//
+// Dentro de cada banda se interpola en log1p, no linealmente, porque la
+// distribución es muy sesgada: la mediana del daño es 0.16 M y el máximo
+// 84,207 M (Otis, Guerrero, octubre 2023). Con escala lineal, 19 de cada 20
+// predicciones quedarían pegadas al extremo izquierdo, indistinguibles entre
+// sí. Es el mismo motivo por el que los modelos entrenan sobre log1p.
+//
+// Los cortes, el techo y la rejilla `ecdf` salen de los 3,958 eventos de
+// backend/app/artifacts/data.joblib (2000-2023). Son una foto del dataset: si
+// se reentrena con datos nuevos, hay que recalcularlos.
+//
+// `ESCALAS` está indexado por el nombre EXACTO del campo que devuelve
+// /predict. La UI recorre las claves de la respuesta, no una lista fija: si el
+// contrato de la API cambia (se quita una métrica o se agrega otra), las
+// tarjetas siguen a la respuesta. Una métrica sin escala registrada se muestra
+// como número sin barra en vez de romper la pantalla.
+// ============================================================
+
+const NIVELES = {
+  bajo: { texto: "Bajo", color: "#16a34a", fondo: "#f0fdf4", borde: "#bbf7d0" },
+  medio: { texto: "Medio", color: "#d97706", fondo: "#fffbeb", borde: "#fde68a" },
+  alto: { texto: "Alto", color: "#dc2626", fondo: "#fef2f2", borde: "#fecaca" },
+};
+
+const PERIODO = "2000-2023";
+
+const ESCALAS = {
+  "Total de daños (millones de pesos)": {
+    etiqueta: "Daño económico estimado",
+    unidad: "millones de pesos",
+    prefijo: "$",
+    formato: "moneda",
+    nEventos: "3,958",
+    textoCero: "Sin daños económicos estimados",
+    notaCero:
+      "1,065 de los 3,958 eventos registrados tampoco reportaron daño económico.",
+    nota: "Costo directo estimado del evento en el estado seleccionado.",
+    bandas: [
+      { hasta: 100, posicion: 0.4, nivel: NIVELES.bajo },
+      { hasta: 500, posicion: 0.7, nivel: NIVELES.medio },
+      { hasta: 84207.02, posicion: 1, nivel: NIVELES.alto },
+    ],
+    marcas: [
+      { posicion: 0.4, etiqueta: "$100 M" },
+      { posicion: 0.7, etiqueta: "$500 M" },
+    ],
+    // P(daño <= x) sobre los 3,958 eventos, en por ciento.
+    ecdf: [
+      [0, 26.91], [0.001, 27.19], [0.01, 30.67], [0.1, 45.5], [0.5, 59.22],
+      [1, 64.07], [5, 74.43], [10, 79.03], [25, 83.78], [50, 87.01],
+      [100, 89.46], [250, 93.2], [500, 95.53], [1000, 97.5], [2500, 99.07],
+      [5000, 99.49], [10000, 99.7], [25000, 99.92], [50000, 99.97],
+      [84207.02, 100],
+    ],
+  },
+
+  "Población afectada": {
+    etiqueta: "Población afectada estimada",
+    unidad: "personas",
+    prefijo: "",
+    formato: "entero",
+    nEventos: "3,916",
+    textoCero: "Sin población afectada estimada",
+    notaCero:
+      "461 de los 3,916 eventos registrados tampoco reportaron población afectada.",
+    nota: "Personas que podrían verse afectadas en el estado seleccionado.",
+    // Cortes elegidos para que caigan en el mismo percentil que los del daño
+    // (10 mil = p89.9 frente a 100 M = p89.5; 30 mil = p95.0 frente a 500 M =
+    // p95.5), de modo que "Impacto Alto" signifique lo mismo en ambas tarjetas.
+    bandas: [
+      { hasta: 10000, posicion: 0.4, nivel: NIVELES.bajo },
+      { hasta: 30000, posicion: 0.7, nivel: NIVELES.medio },
+      { hasta: 4050452, posicion: 1, nivel: NIVELES.alto },
+    ],
+    marcas: [
+      { posicion: 0.4, etiqueta: "10 mil" },
+      { posicion: 0.7, etiqueta: "30 mil" },
+    ],
+    ecdf: [
+      [0, 11.77], [10, 32.15], [50, 44.77], [100, 52.32], [500, 70.91],
+      [1000, 76.71], [5000, 86.34], [10000, 89.86], [30000, 94.97],
+      [50000, 96.71], [100000, 98.01], [250000, 98.95], [500000, 99.34],
+      [1000000, 99.72], [2000000, 99.9], [4050452, 100],
+    ],
+  },
+};
+
+/** Banda (Bajo/Medio/Alto) a la que pertenece un valor. */
+function bandaDe(valor, bandas) {
+  const v = Math.max(0, Number(valor) || 0);
+  return bandas.find((b) => v < b.hasta) ?? bandas[bandas.length - 1];
+}
+
+/**
+ * Posición del valor en el riel, de 0 a 1.
+ * Interpolación log1p dentro de cada banda; los bordes de banda caen exactamente
+ * en `posicion`, que es lo que mantiene coherentes color y llenado.
+ */
+function posicionEnEscala(valor, bandas) {
+  const v = Math.max(0, Number(valor) || 0);
+  let piso = 0;
+  let posPiso = 0;
+
+  for (const banda of bandas) {
+    const esUltima = banda === bandas[bandas.length - 1];
+
+    if (v < banda.hasta || esUltima) {
+      const lo = Math.log1p(piso);
+      const hi = Math.log1p(banda.hasta);
+      const t = hi > lo ? (Math.log1p(v) - lo) / (hi - lo) : 0;
+      const acotado = Math.min(1, Math.max(0, t));
+      return posPiso + (banda.posicion - posPiso) * acotado;
+    }
+
+    piso = banda.hasta;
+    posPiso = banda.posicion;
+  }
+
+  return 1;
+}
+
+/** Porcentaje de eventos históricos con valor menor o igual. Interpola en log1p. */
+function percentilHistorico(valor, ecdf) {
+  if (!ecdf?.length) return null;
+
+  const v = Math.max(0, Number(valor) || 0);
+  if (v <= ecdf[0][0]) return ecdf[0][1];
+
+  for (let i = 1; i < ecdf.length; i += 1) {
+    const [x0, y0] = ecdf[i - 1];
+    const [x1, y1] = ecdf[i];
+
+    if (v <= x1) {
+      const lo = Math.log1p(x0);
+      const hi = Math.log1p(x1);
+      const t = hi > lo ? (Math.log1p(v) - lo) / (hi - lo) : 1;
+      return y0 + (y1 - y0) * t;
+    }
+  }
+
+  return 100;
+}
+
+/**
+ * Decimales adaptativos. La API expone los daños con CUATRO decimales a
+ * propósito: el daño no nulo más pequeño del registro es 0.00047 M y 76 eventos
+ * caen por debajo de 0.005. Formatear a dos decimales los mostraría como "$0",
+ * reintroduciendo en la pantalla el mismo error que el backend ya corrigió.
+ */
+function fmtValor(valor, escala) {
+  const n = Number(valor) || 0;
+
+  if (escala?.formato !== "moneda") {
+    return Math.round(n).toLocaleString("es-MX");
+  }
+
+  const decimales = n < 0.01 ? 4 : n < 1 ? 3 : n < 1000 ? 2 : 0;
+  return n.toLocaleString("es-MX", {
+    minimumFractionDigits: decimales,
+    maximumFractionDigits: decimales,
+  });
+}
+
+const ESTILOS_PROGRESO = `
+@keyframes pred-barrido {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(340%); }
+}
+.pred-riel-indeterminado::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+  border-radius: 20px;
+  background: linear-gradient(90deg, rgba(148,163,184,0) 0%, #94a3b8 50%, rgba(148,163,184,0) 100%);
+  animation: pred-barrido 1.2s ease-in-out infinite;
+}
+@keyframes pred-latido {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.pred-esqueleto { animation: pred-latido 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pred-riel-indeterminado::after { animation-duration: 3.5s; }
+  .pred-esqueleto { animation: none; opacity: 0.6; }
+}
+`;
+
 export default function App() {
   const [tab, setTab] = useState("predictor");
 
@@ -32,6 +234,33 @@ export default function App() {
   const [pred, setPred] = useState(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Segundos transcurridos de la petición en curso, y duración congelada de la
+  // última predicción lograda. Sirven para que la espera no sea muda.
+  const [segundos, setSegundos] = useState(0);
+  const [duracion, setDuracion] = useState(null);
+
+  // Qué tarjetas dibujar mientras aún no hay respuesta. Arranca con las métricas
+  // conocidas y se reajusta a lo que /predict devolvió la última vez.
+  //
+  // Ojo con el alcance de ese auto-ajuste: solo corrige DESPUÉS de la primera
+  // respuesta. En la primera carga de la página el esqueleto se dibuja a partir
+  // de ESCALAS, así que si se quita una métrica del contrato de /predict sin
+  // quitar su entrada de ESCALAS, el usuario ve una tarjeta fantasma durante esa
+  // primera espera. Al cambiar el contrato, borrar también la entrada.
+  const [clavesEsperadas, setClavesEsperadas] = useState(() =>
+    Object.keys(ESCALAS),
+  );
+
+  useEffect(() => {
+    if (!loading) return undefined;
+
+    const t0 = Date.now();
+    setSegundos(0);
+    const id = setInterval(() => setSegundos((Date.now() - t0) / 1000), 200);
+
+    return () => clearInterval(id);
+  }, [loading]);
 
   const onChange = (e) => {
     const { name, value } = e.target;
@@ -58,13 +287,17 @@ export default function App() {
     });
     setPred(null);
     setErr("");
+    setDuracion(null);
   };
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr("");
     setPred(null);
+    setDuracion(null);
     setLoading(true);
+
+    const t0 = Date.now();
 
     try {
       const payload = {
@@ -76,7 +309,13 @@ export default function App() {
       };
 
       const data = await predict(payload);
-      setPred(data.prediction);
+      const prediccion = data.prediction ?? {};
+
+      setPred(prediccion);
+      setDuracion((Date.now() - t0) / 1000);
+
+      const claves = Object.keys(prediccion);
+      if (claves.length > 0) setClavesEsperadas(claves);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -84,37 +323,23 @@ export default function App() {
     }
   };
 
-  const fmt = (v) => {
-    if (v === null || v === undefined) return "-";
-    return Number(v).toLocaleString("es-MX", {
-      maximumFractionDigits: 2,
-    });
-  };
+  // Las tarjetas siguen a la respuesta, no a una lista fija de campos.
+  const claves = pred ? Object.keys(pred) : clavesEsperadas;
 
-  const getNivelImpacto = (valor) => {
-    if (valor < 100) {
-      return { texto: "Bajo", color: "#22c55e" };
-    }
-
-    if (valor < 500) {
-      return { texto: "Medio", color: "#f59e0b" };
-    }
-
-    return { texto: "Alto", color: "#ef4444" };
-  };
-
-  const monto = pred?.["Total de daños (millones de pesos)"] || 0;
-  const poblacion = pred?.["Población afectada"] || 0;
-  const nivel = getNivelImpacto(monto);
-
-  const fmtEntero = (v) =>
-    Number(Math.round(v)).toLocaleString("es-MX", { maximumFractionDigits: 0 });
+  // /predict es un solo viaje de red: no hay etapas internas que informar, así
+  // que en vez de inventar porcentajes se informa el tiempo y, si se alarga, el
+  // motivo más probable (el backend despertando tras estar inactivo).
+  const textoEspera =
+    segundos < 4
+      ? "Consultando el modelo…"
+      : "Consultando el modelo… puede tardar si el servidor llevaba rato inactivo.";
 
   const tiposDisponibles =
     tiposPorClasificacion[form.Clasificación_del_fenómeno] || [];
 
   return (
     <div style={{ minHeight: "100vh", background: "#f3f4f6", fontFamily: "system-ui, Arial" }}>
+      <style>{ESTILOS_PROGRESO}</style>
 
       {/* Barra de pestañas */}
       <div style={{ background: "#ffffff", borderBottom: "1px solid #e5e7eb", padding: "0 20px" }}>
@@ -336,82 +561,41 @@ export default function App() {
           </p>
         )}
 
-        {pred && (
+        {(loading || pred) && (
           <div style={{ marginTop: 34 }}>
-            <h2 style={{ marginBottom: 14 }}>Resultado estimado</h2>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                marginBottom: 14,
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Resultado estimado</h2>
+
+              <span
+                style={{ fontSize: 13, color: "#6b7280" }}
+                aria-live="polite"
+              >
+                {loading
+                  ? `${textoEspera} ${segundos.toFixed(1)} s`
+                  : duracion !== null
+                    ? `Calculado en ${duracion.toFixed(1)} s`
+                    : ""}
+              </span>
+            </div>
 
             <div style={gridStyle}>
-              {/* Daño económico */}
-              <div
-                style={{
-                  padding: 24,
-                  borderRadius: 18,
-                  border: "1px solid #e5e7eb",
-                  background: "#fafafa",
-                }}
-              >
-                <p style={{ margin: 0, opacity: 0.7 }}>
-                  Daño económico estimado
-                </p>
-
-                <div style={{ fontSize: 32, fontWeight: 800, marginTop: 6 }}>
-                  ${fmt(monto)} <span style={{ fontSize: 16, fontWeight: 600 }}>millones de pesos</span>
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 12,
-                    color: nivel.color,
-                    fontWeight: "bold",
-                    fontSize: 20,
-                  }}
-                >
-                  Impacto {nivel.texto}
-                </div>
-
-                <div
-                  style={{
-                    width: "100%",
-                    height: 18,
-                    background: "#e5e7eb",
-                    borderRadius: 20,
-                    overflow: "hidden",
-                    marginTop: 16,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${Math.min((monto / 2000) * 100, 100)}%`,
-                      height: "100%",
-                      background: nivel.color,
-                      transition: "width 0.4s ease",
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Población afectada */}
-              <div
-                style={{
-                  padding: 24,
-                  borderRadius: 18,
-                  border: "1px solid #e5e7eb",
-                  background: "#fafafa",
-                }}
-              >
-                <p style={{ margin: 0, opacity: 0.7 }}>
-                  Población afectada estimada
-                </p>
-
-                <div style={{ fontSize: 32, fontWeight: 800, marginTop: 6 }}>
-                  {fmtEntero(poblacion)} <span style={{ fontSize: 16, fontWeight: 600 }}>personas</span>
-                </div>
-
-                <p style={{ marginTop: 12, fontSize: 13, opacity: 0.6 }}>
-                  Número aproximado de personas que podrían verse afectadas por el
-                  evento en el estado seleccionado.
-                </p>
-              </div>
+              {claves.map((clave) => (
+                <TarjetaMetrica
+                  key={clave}
+                  clave={clave}
+                  valor={pred?.[clave]}
+                  cargando={loading}
+                />
+              ))}
             </div>
 
             <p style={{ marginTop: 12, fontSize: 12, opacity: 0.6 }}>
@@ -475,4 +659,207 @@ const buttonSecondaryStyle = {
   cursor: "pointer",
   background: "white",
   fontWeight: 700,
+};
+
+/**
+ * El riel de la predicción.
+ *
+ * Es UNA sola barra que vive en el mismo sitio durante todo el ciclo: mientras
+ * se calcula muestra un barrido indeterminado, y cuando llega el resultado se
+ * llena hasta la posición del valor. Deliberadamente NO finge un porcentaje
+ * durante la carga: /predict es un único viaje de red, no hay etapas reales que
+ * medir, y una barra que avanzara al 90% para luego retroceder al 12% al
+ * aterrizar un impacto Bajo se leería como un error. Las marcas de banda ya
+ * están dibujadas mientras carga, así que el resultado llega a una escala que
+ * el usuario ya tenía delante: la barra se rellena, no se reinventa.
+ */
+function BarraEscala({ cargando, posicion, color, marcas }) {
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div
+        className={cargando ? "pred-riel-indeterminado" : undefined}
+        style={{
+          position: "relative",
+          width: "100%",
+          height: 18,
+          background: "#e5e7eb",
+          borderRadius: 20,
+          overflow: "hidden",
+        }}
+      >
+        {!cargando && (
+          <div
+            style={{
+              width: `${(posicion * 100).toFixed(2)}%`,
+              height: "100%",
+              background: color,
+              borderRadius: 20,
+              transition:
+                "width 0.55s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.35s ease",
+            }}
+          />
+        )}
+
+        {marcas.map((m) => (
+          <div
+            key={m.etiqueta}
+            style={{
+              position: "absolute",
+              left: `${m.posicion * 100}%`,
+              top: 0,
+              bottom: 0,
+              width: 2,
+              background: "rgba(17,24,39,0.25)",
+              pointerEvents: "none",
+            }}
+          />
+        ))}
+      </div>
+
+      <div style={{ position: "relative", height: 15, marginTop: 5 }}>
+        <span style={etiquetaMarcaStyle(0)}>0</span>
+
+        {marcas.map((m) => (
+          <span key={m.etiqueta} style={etiquetaMarcaStyle(m.posicion)}>
+            {m.etiqueta}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+BarraEscala.propTypes = {
+  cargando: PropTypes.bool,
+  posicion: PropTypes.number,
+  color: PropTypes.string,
+  marcas: PropTypes.arrayOf(
+    PropTypes.shape({
+      posicion: PropTypes.number.isRequired,
+      etiqueta: PropTypes.string.isRequired,
+    }),
+  ).isRequired,
+};
+
+function etiquetaMarcaStyle(posicion) {
+  return {
+    position: "absolute",
+    left: `${posicion * 100}%`,
+    transform: posicion === 0 ? "none" : "translateX(-50%)",
+    fontSize: 11,
+    color: "#6b7280",
+    whiteSpace: "nowrap",
+  };
+}
+
+/**
+ * Una métrica de la respuesta de /predict.
+ * `clave` es el nombre exacto del campo devuelto por la API. Si no hay escala
+ * registrada para esa clave, cae a una tarjeta sin barra en lugar de romperse.
+ */
+function TarjetaMetrica({ clave, valor, cargando }) {
+  const escala = ESCALAS[clave];
+
+  if (!escala) {
+    return (
+      <div style={tarjetaStyle}>
+        <p style={{ margin: 0, opacity: 0.7 }}>{clave}</p>
+        <div style={{ fontSize: 32, fontWeight: 800, marginTop: 6 }}>
+          {cargando ? "—" : Number(valor ?? 0).toLocaleString("es-MX")}
+        </div>
+      </div>
+    );
+  }
+
+  const v = Math.max(0, Number(valor) || 0);
+  const banda = bandaDe(v, escala.bandas);
+  const posicion = posicionEnEscala(v, escala.bandas);
+  const percentil = percentilHistorico(v, escala.ecdf);
+  const esCero = !cargando && v === 0;
+
+  return (
+    <div
+      style={{
+        ...tarjetaStyle,
+        borderColor: cargando ? "#e5e7eb" : banda.nivel.borde,
+        background: cargando ? "#fafafa" : banda.nivel.fondo,
+      }}
+    >
+      <p style={{ margin: 0, opacity: 0.7 }}>{escala.etiqueta}</p>
+
+      <div style={{ marginTop: 6, minHeight: 42 }}>
+        {cargando ? (
+          <span
+            className="pred-esqueleto"
+            style={{
+              display: "inline-block",
+              width: "65%",
+              height: 30,
+              borderRadius: 7,
+              background: "#e5e7eb",
+            }}
+          />
+        ) : esCero ? (
+          <span style={{ fontSize: 21, fontWeight: 700, color: "#374151" }}>
+            {escala.textoCero}
+          </span>
+        ) : (
+          <span style={{ fontSize: 32, fontWeight: 800 }}>
+            {escala.prefijo}
+            {fmtValor(v, escala)}{" "}
+            <span style={{ fontSize: 16, fontWeight: 600 }}>{escala.unidad}</span>
+          </span>
+        )}
+      </div>
+
+      <div
+        style={{
+          marginTop: 12,
+          fontWeight: "bold",
+          fontSize: 20,
+          minHeight: 26,
+          color: cargando ? "#9ca3af" : banda.nivel.color,
+        }}
+      >
+        {cargando ? "Calculando…" : `Impacto ${banda.nivel.texto}`}
+      </div>
+
+      <BarraEscala
+        cargando={cargando}
+        posicion={posicion}
+        color={banda.nivel.color}
+        marcas={escala.marcas}
+      />
+
+      <p
+        style={{
+          marginTop: 12,
+          fontSize: 12.5,
+          lineHeight: 1.45,
+          color: "#4b5563",
+          minHeight: 36,
+        }}
+      >
+        {cargando
+          ? " "
+          : esCero
+            ? escala.notaCero
+            : `Por encima del ${percentil.toFixed(percentil >= 99.5 ? 2 : 1)}% de los ${escala.nEventos} eventos registrados (${PERIODO}). ${escala.nota}`}
+      </p>
+    </div>
+  );
+}
+
+TarjetaMetrica.propTypes = {
+  clave: PropTypes.string.isRequired,
+  valor: PropTypes.number,
+  cargando: PropTypes.bool,
+};
+
+const tarjetaStyle = {
+  padding: 24,
+  borderRadius: 18,
+  border: "1px solid #e5e7eb",
+  background: "#fafafa",
+  transition: "background-color 0.35s ease, border-color 0.35s ease",
 };
