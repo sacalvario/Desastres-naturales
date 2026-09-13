@@ -50,9 +50,22 @@ TARGET = "Total de daños (millones de pesos)"
 # lluvias era -0.4567 y el de ciclones -0.0607; quitándolas suben a -0.0739 y +0.0771. Con
 # tan pocas filas por combinación, esas variables aportan ruido en vez de señal.
 #
-# `WMO_PRES` se descartó por lo mismo: en ciclones hace caer el R² de +0.0771 a -0.0298,
-# pese a correlacionar con el daño por sí sola. Está muy correlacionada con el viento, que
-# ya entra vía la intensidad.
+# `WMO_PRES` quedó fuera, y conviene dejar escrito por qué, porque la primera razón que se
+# dio era incorrecta. Se descartó midiendo con un `dropna` que incluía la propia columna, lo
+# que descartaba los 18 ciclones sin presión y comparaba contra otro conjunto de prueba; con
+# el filtro correcto la columna parecía mejorar el R² medio de +0.0467 a +0.0588. Se
+# mantiene fuera por dos razones distintas, ambas medidas:
+#
+# 1. La ventaja no sobrevive a ponderar cada corte por su número de filas de prueba: la
+#    presión pierde en los dos cortes con más datos (80 y 74 filas) y gana en los tres con
+#    menos (61, 51, 30). La correlación entre el tamaño del test y su ventaja es -0.929, y
+#    la diferencia pasa de +0.0121 en media simple a -0.0050 en media ponderada. Un
+#    resultado cuyo signo depende de cómo se agregue no es un resultado.
+#
+# 2. Con la presión dentro, la intensidad deja de mover la predicción: los siete niveles de
+#    Saffir-Simpson devuelven el mismo número, con presión y sin ella, incluso forzando
+#    monotonía en ambas columnas. Eso vacía la función que el predictor debe ofrecer, que es
+#    responder al escenario de intensidad que plantea quien lo usa.
 CAT_FEATURES = ["Estado"]
 NUM_COMUNES = ["intensidad"]
 NUM_POR_TIPO = {TIPO_LLUVIAS: [], TIPO_CICLONES: []}
@@ -162,6 +175,19 @@ def features_de(tipo):
     return CAT_FEATURES + NUM_COMUNES + NUM_POR_TIPO[tipo]
 
 
+def filas_utilizables(df, tipo):
+    """Filas del tipo con las features BASE presentes.
+
+    El filtro nunca exige las columnas propias del tipo: si se exigiera `WMO_PRES`, los
+    18 ciclones que no la traen desaparecerían y cada variante del modelo se evaluaría
+    sobre un conjunto distinto, que fue exactamente el error que dio por perjudicial a esa
+    columna. Los nulos los maneja HistGradientBoosting de forma nativa.
+    """
+    return df[df["Tipo de fenómeno"] == tipo].dropna(
+        subset=CAT_FEATURES + NUM_COMUNES + [TARGET]
+    )
+
+
 def build_preprocessor(tipo):
     return ColumnTransformer(
         transformers=[
@@ -202,8 +228,7 @@ def evalua_por_cortes(df, tipo):
     La línea base es la que hay que batir: predecir el promedio histórico del tipo de
     fenómeno gana al modelo anterior del proyecto en R² y en MAE.
     """
-    d = df.dropna(subset=features_de(tipo) + [TARGET])
-    d = d[d["Tipo de fenómeno"] == tipo]
+    d = filas_utilizables(df, tipo)
     r2s, maes, r2_base = [], [], []
 
     for corte in CORTES:
@@ -237,7 +262,7 @@ def verifica_monotonia(modelo, prep, tipo, df):
     Es la prueba que impide el fallo que llegaría a una demo: un huracán categoría 5
     anunciando menos daño que una depresión tropical.
     """
-    base = df[df["Tipo de fenómeno"] == tipo].dropna(subset=features_de(tipo)).iloc[0]
+    base = filas_utilizables(df, tipo).iloc[0]
     niveles = range(1, 8 if tipo == TIPO_CICLONES else 4)
     predicciones = []
     for nivel in niveles:
@@ -262,7 +287,7 @@ def main():
 
     metricas, modelos = {}, {}
     for tipo in TIPOS:
-        d = df[df["Tipo de fenómeno"] == tipo].dropna(subset=features_de(tipo) + [TARGET])
+        d = filas_utilizables(df, tipo)
         metricas[tipo] = evalua_por_cortes(df, tipo)
         modelo, prep = entrena(d, tipo)
         modelos[tipo] = (modelo, prep, len(d))
