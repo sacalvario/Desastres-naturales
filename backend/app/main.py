@@ -4,10 +4,19 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from pathlib import Path
+from typing import Optional
 import pandas as pd
 import numpy as np
 import joblib
 import json
+
+from app.intensidad import (
+    DESCONOCIDA,
+    TIPO_CICLONES,
+    TIPO_LLUVIAS,
+    nivel_desde_etiqueta,
+    opciones,
+)
 
 STATS_CACHE = "public, max-age=3600"
 
@@ -40,41 +49,44 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # ── Rutas de artefactos del modelo ──────────────────────────────
+# Un modelo por tipo de fenómeno. Las variables que describen la intensidad son disjuntas
+# (ninguna fila tiene lluvia acumulada y viento a la vez), así que un modelo único recibía
+# columnas vacías en la mayoría de las filas. Ver el diseño en
+# docs/superpowers/specs/2026-09-13-intensidad-y-modelos-por-tipo-design.md
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts"
-MODEL_DANOS_PATH = ARTIFACTS_DIR / "model_danos.joblib"
-MODEL_POBL_PATH  = ARTIFACTS_DIR / "model_poblacion.joblib"
-PREP_PATH        = ARTIFACTS_DIR / "preprocessor.joblib"
-POBL_PATH        = ARTIFACTS_DIR / "poblacion_estatal.joblib"
-META_PATH        = ARTIFACTS_DIR / "metadata.json"
-DATA_PATH        = ARTIFACTS_DIR / "data.joblib"
+POBL_PATH = ARTIFACTS_DIR / "poblacion_estatal.joblib"
+META_PATH = ARTIFACTS_DIR / "metadata.json"
+DATA_PATH = ARTIFACTS_DIR / "data.joblib"
+INTENSIDAD_PATH = ARTIFACTS_DIR / "intensidad.joblib"
 
-# Targets que devuelve el predictor ex-ante
 TARGET_DANOS = "Total de daños (millones de pesos)"
-TARGET_POBL  = "Población afectada"
 
-model_danos  = None
-model_pobl   = None
-preprocessor = None
-poblacion    = None     # lookup {(Estado, Año): población estatal}
-target       = TARGET_DANOS
-metadata     = {}
+# {tipo de fenómeno: (modelo, preprocesador)}
+modelos = {}
+poblacion = None     # lookup {(Estado, Año): población estatal}
+target = TARGET_DANOS
+metadata = {}
+cortes_lluvia = None  # umbrales de mm con los que se entrenó la intensidad de lluvia
 
-# Features ex-ante en el orden que espera el preprocesador
-FEATURES = ["Clasificación del fenómeno", "Tipo de fenómeno", "Estado",
-            "Año", "mes_sin", "mes_cos", "Población estatal"]
+# Features en el orden que espera cada preprocesador. Año, mes y población estatal se
+# quitaron del modelo tras medir que degradaban el R² en lugar de mejorarlo.
+FEATURES = ["Estado", "intensidad"]
 
 # Normalización de estado: etiquetas del frontend -> nombres del modelo/censo
 STATE_ALIASES = {"CDMX": "Ciudad de México", "Estado de México": "México"}
 
-if MODEL_DANOS_PATH.exists() and PREP_PATH.exists():
-    model_danos  = joblib.load(MODEL_DANOS_PATH)
-    preprocessor = joblib.load(PREP_PATH)
-    if MODEL_POBL_PATH.exists():
-        model_pobl = joblib.load(MODEL_POBL_PATH)
-    if POBL_PATH.exists():
-        poblacion = joblib.load(POBL_PATH)
-    if META_PATH.exists():
-        metadata = json.loads(META_PATH.read_text(encoding="utf-8"))
+for _tipo, _nombre in ((TIPO_LLUVIAS, "lluvias"), (TIPO_CICLONES, "ciclones")):
+    _modelo = ARTIFACTS_DIR / f"model_{_nombre}.joblib"
+    _prep = ARTIFACTS_DIR / f"preprocessor_{_nombre}.joblib"
+    if _modelo.exists() and _prep.exists():
+        modelos[_tipo] = (joblib.load(_modelo), joblib.load(_prep))
+
+if POBL_PATH.exists():
+    poblacion = joblib.load(POBL_PATH)
+if META_PATH.exists():
+    metadata = json.loads(META_PATH.read_text(encoding="utf-8"))
+if INTENSIDAD_PATH.exists():
+    cortes_lluvia = tuple(joblib.load(INTENSIDAD_PATH)["cortes_lluvia"])
 
 # ── Carga de datos históricos para el dashboard ─────────────────
 # El DataFrame ya viene limpio y normalizado desde train_model_simple.py
@@ -98,16 +110,17 @@ def root():
 
 @app.get("/health")
 def health():
+    listo = bool(modelos) and poblacion is not None and stats_df is not None
     return {
-        "status":                  "ok",
-        "model_danos_loaded":      model_danos is not None,
-        "model_poblacion_loaded":  model_pobl is not None,
-        "preprocessor_loaded":     preprocessor is not None,
-        "poblacion_loaded":        poblacion is not None,
-        "stats_loaded":            stats_df is not None,
-        "mode":                    metadata.get("mode"),
-        "features":                metadata.get("features"),
-        "models":                  metadata.get("models"),
+        # El estado refleja si el servicio puede responder de verdad. Antes devolvía
+        # siempre "ok", de modo que un monitor externo lo veía sano aunque no hubiera
+        # ni un artefacto cargado.
+        "status":            "ok" if listo else "degraded",
+        "modelos_cargados":  sorted(modelos),
+        "poblacion_loaded":  poblacion is not None,
+        "stats_loaded":      stats_df is not None,
+        "mode":              metadata.get("mode"),
+        "models":            metadata.get("models"),
     }
 
 
@@ -118,59 +131,66 @@ def health():
 class PredictRequest(BaseModel):
     Año: int
     Mes: int
-    Clasificación_del_fenómeno: str
     Tipo_de_fenómeno: str
     Estado: str
+    # Etiqueta de intensidad tal y como la sirve GET /intensidades para ese tipo.
+    # Es opcional: quien no conozca la intensidad recibe la predicción de "Desconocida".
+    intensidad: Optional[str] = None
 
 
-def _poblacion_estatal(estado: str, año: int) -> float:
-    """Población del estado para el año dado, desde el lookup del censo.
-    Años fuera de rango se clampan; estado desconocido usa la mediana nacional."""
-    if poblacion is None:
-        return 0.0
-    yr = min(max(año, poblacion["year_min"]), poblacion["year_max"])
-    val = poblacion["by_state_year"].get((estado, yr))
-    if val is None:
-        return poblacion["national_median"]
-    return val
+@app.get("/intensidades")
+def intensidades():
+    """Categorías de intensidad válidas por tipo de fenómeno.
+
+    El frontend las pide en vez de llevarlas escritas a mano: los cortes de lluvia salen
+    de los cuantiles del entrenamiento y cambian si se reentrena con otros datos.
+    """
+    if cortes_lluvia is None:
+        return JSONResponse(
+            {"error": "Artefacto de intensidad no disponible. Ejecuta train_model_simple.py."},
+            status_code=503,
+        )
+    return {"tipos": opciones(cortes_lluvia)}
 
 
 @app.post("/predict")
 def predict(req: PredictRequest):
-    if model_danos is None or preprocessor is None:
-        return {
-            "error": "Modelos o preprocessor no cargados",
-            "hint": "Ejecuta train_model_simple.py para generar los artifacts en backend/app/artifacts/",
-        }
+    tipo = req.Tipo_de_fenómeno.strip()
 
-    d = req.dict()
+    if tipo not in modelos or cortes_lluvia is None:
+        # 503, no 200: un error devuelto con código de éxito deja al frontend pintando
+        # valores vacíos sin enterarse de que nada funcionó.
+        return JSONResponse(
+            {
+                "error": f"No hay modelo disponible para '{tipo}'",
+                "tipos_disponibles": sorted(modelos),
+                "hint": "Ejecuta train_model_simple.py para generar los artefactos.",
+            },
+            status_code=503,
+        )
+
+    etiqueta = (req.intensidad or DESCONOCIDA).strip()
+    try:
+        nivel = nivel_desde_etiqueta(tipo, etiqueta, cortes_lluvia)
+    except ValueError as err:
+        return JSONResponse({"error": str(err)}, status_code=422)
+
     # Normalizar estado: tomar el primero si vienen varios; aplicar alias.
-    estado = d["Estado"].split(",")[0].strip()
+    estado = req.Estado.split(",")[0].strip()
     estado = STATE_ALIASES.get(estado, estado)
 
-    mes = d["Mes"]
-    row = {
-        "Clasificación del fenómeno": d["Clasificación_del_fenómeno"],
-        "Tipo de fenómeno":           d["Tipo_de_fenómeno"],
-        "Estado":                     estado,
-        "Año":                        d["Año"],
-        "mes_sin":                    np.sin(2 * np.pi * mes / 12),
-        "mes_cos":                    np.cos(2 * np.pi * mes / 12),
-        "Población estatal":          _poblacion_estatal(estado, d["Año"]),
-    }
-
-    X = preprocessor.transform(pd.DataFrame([row])[FEATURES])
+    modelo, preprocesador = modelos[tipo]
+    fila = pd.DataFrame([{"Estado": estado, "intensidad": nivel}])[FEATURES]
+    X = preprocesador.transform(fila)
     if hasattr(X, "toarray"):
         X = X.toarray()
 
-    danos = float(max(np.expm1(model_danos.predict(X))[0], 0))
-    prediction = {TARGET_DANOS: danos}
-
-    if model_pobl is not None:
-        pobl = float(max(np.expm1(model_pobl.predict(X))[0], 0))
-        prediction[TARGET_POBL] = pobl
-
-    return {"prediction": prediction}
+    danos = float(max(np.expm1(modelo.predict(X))[0], 0))
+    return {
+        "prediction": {TARGET_DANOS: danos},
+        "modelo": tipo,
+        "intensidad_usada": etiqueta,
+    }
 
 
 # ════════════════════════════════════════════════════════════════
@@ -339,6 +359,14 @@ COLUMNAS_SUCIAS = {
     "hospitales":  "Hospitales",
     "comercios":   "Comercios",
     "cultivo":     "Area de cultivo dañada / pastizales (h)",
+    # "Población afectada" y "Duración días" llegaban como números en la primera
+    # versión del Excel, así que se leían directo. En una revisión posterior del
+    # conjunto de datos aparecieron con "SD" y "NSR" de texto, y la conversión
+    # directa a int reventaba **en el import del módulo**: la API entera dejaba
+    # de arrancar por un valor sucio en una columna del dashboard. Pasan por la
+    # misma limpieza que las demás.
+    "poblacion":   "Población afectada",
+    "duracion":    "Duración días",
 }
 
 # Orden de las columnas en cada fila de /stats/eventos. El frontend lo lee del
@@ -366,16 +394,27 @@ def _a_numero(serie: pd.Series) -> pd.Series:
 
 
 def _entero_o_nulo(valor) -> int | None:
-    """NaN -> None, para que el JSON salga con `null` y no con `NaN` (inválido)."""
-    if valor is None or pd.isna(valor):
+    """NaN o basura -> None, para que el JSON salga con `null` y no con `NaN`.
+
+    Tolera lo no convertible en vez de lanzar: esta función corre al construir la
+    tabla de eventos, que se arma en el import del módulo. Una excepción aquí no
+    degrada un dato, impide que la API arranque.
+    """
+    if valor is None or (not isinstance(valor, str) and pd.isna(valor)):
         return None
-    return int(valor)
+    try:
+        return int(float(valor))
+    except (TypeError, ValueError):
+        return None
 
 
 def _decimal_o_nulo(valor, decimales: int = 2) -> float | None:
-    if valor is None or pd.isna(valor):
+    if valor is None or (not isinstance(valor, str) and pd.isna(valor)):
         return None
-    return round(float(valor), decimales)
+    try:
+        return round(float(valor), decimales)
+    except (TypeError, ValueError):
+        return None
 
 
 def _construir_eventos() -> dict | None:
@@ -400,13 +439,13 @@ def _construir_eventos() -> dict | None:
             registro["Estado"],
             registro["Clasificación del fenómeno"],
             registro["Tipo de fenómeno"],
-            _entero_o_nulo(registro.get("Duración días")),
+            _entero_o_nulo(registro.get("duracion")),
             # Cuatro decimales, no dos: el daño no nulo más pequeño del dataset
             # es 0.00047 millones (unos 466 pesos) y hay 76 eventos por debajo
             # de 0.005. Redondear a dos decimales los mandaba a cero y el
             # histograma reportaba 1,141 eventos "sin daño" donde hay 1,065.
             _decimal_o_nulo(registro[target], 4) if registro[target] is not None else 0.0,
-            _entero_o_nulo(registro.get("Población afectada")),
+            _entero_o_nulo(registro.get("poblacion")),
             _entero_o_nulo(registro.get("defunciones")),
             _entero_o_nulo(registro.get("viviendas")),
             _entero_o_nulo(registro.get("escuelas")),
