@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "verify:geojson": "node scripts/verifica-geojson.mjs"
+    "verify:geojson": "node scripts/verifica-geojson.mjs",
+    "prueba:agregaciones": "node scripts/prueba-agregaciones.mjs"
   },
   "dependencies": {
     "d3-scale": "^4.0.2",

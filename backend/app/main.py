@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from pathlib import Path
@@ -12,17 +13,31 @@ STATS_CACHE = "public, max-age=3600"
 
 app = FastAPI(title="Impacto Desastres API", version="1.0")
 
+# Orígenes de producción: lista explícita. Cualquier despliegue nuevo del
+# frontend tiene que agregarse aquí a mano.
+ORIGENES_PRODUCCION = [
+    "https://desastres-naturales-gamma.vercel.app",
+]
+
+# En desarrollo se acepta cualquier puerto de localhost. Vite no siempre levanta
+# en 5173 (si el puerto está ocupado toma el siguiente libre), y fijar un solo
+# puerto obliga a editar el backend cada vez que eso pasa. La expresión solo
+# abre la máquina local, así que no relaja nada en producción.
+ORIGENES_DESARROLLO = r"http://(localhost|127\.0\.0\.1):\d+"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://desastres-naturales-gamma.vercel.app",
-    ],
+    allow_origins=ORIGENES_PRODUCCION,
+    allow_origin_regex=ORIGENES_DESARROLLO,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# El dashboard descarga el dataset completo de eventos una sola vez (~500 KB en
+# claro). Comprimido baja a ~80 KB, así que el gzip no es un lujo: es lo que hace
+# viable mandar el detalle por evento en vez de solo agregados.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # ── Rutas de artefactos del modelo ──────────────────────────────
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts"
@@ -300,5 +315,153 @@ def stats_top_eventos(limit: int = 10):
             }
             for _, r in df.iterrows()
         ],
+        headers={"Cache-Control": STATS_CACHE},
+    )
+
+
+# ════════════════════════════════════════════════════════════════
+# DATASET COMPLETO PARA EL DASHBOARD INTERACTIVO
+# ════════════════════════════════════════════════════════════════
+# Los endpoints /stats/* de arriba devuelven agregados fijos: sirven para una
+# vista estática, pero cada filtro nuevo exigiría un viaje al servidor. Con 3,958
+# eventos el dataset entero cabe en una respuesta comprimida (~80 KB), así que
+# se manda una sola vez y el frontend filtra y agrega en memoria. El resultado es
+# filtrado instantáneo y cruzado (clic en un estado, brush sobre los años) sin
+# latencia de red. Si el dataset creciera un orden de magnitud, este endpoint
+# tendría que volver a agregar del lado del servidor.
+
+# Columnas del Excel que llegan como texto sucio ("SD", "sd", "19 362 ",
+# " 13,637.00 \n") y hay que convertir a número antes de exponerlas.
+COLUMNAS_SUCIAS = {
+    "defunciones": "Defunciones",
+    "viviendas":   "Viviendas dañadas",
+    "escuelas":    "Escuelas",
+    "hospitales":  "Hospitales",
+    "comercios":   "Comercios",
+    "cultivo":     "Area de cultivo dañada / pastizales (h)",
+}
+
+# Orden de las columnas en cada fila de /stats/eventos. El frontend lo lee del
+# campo "columnas" de la respuesta, así que agregar una columna aquí no rompe
+# nada mientras se agregue también al armado de la fila.
+COLUMNAS_EVENTOS = [
+    "año", "mes", "estado", "clasificacion", "tipo", "duracion",
+    "daños", "poblacion", "defunciones", "viviendas",
+    "escuelas", "hospitales", "comercios", "cultivo",
+]
+
+
+def _a_numero(serie: pd.Series) -> pd.Series:
+    """Convierte una columna de texto sucio a número.
+
+    Quita todo lo que no sea dígito, punto o signo (comas de millar, espacios,
+    saltos de línea) y manda a NaN los marcadores de "sin dato" ("SD", "sd").
+    """
+    limpia = (
+        serie.astype(str)
+        .str.replace(r"[^\d.\-]", "", regex=True)
+        .replace("", np.nan)
+    )
+    return pd.to_numeric(limpia, errors="coerce")
+
+
+def _entero_o_nulo(valor) -> int | None:
+    """NaN -> None, para que el JSON salga con `null` y no con `NaN` (inválido)."""
+    if valor is None or pd.isna(valor):
+        return None
+    return int(valor)
+
+
+def _decimal_o_nulo(valor, decimales: int = 2) -> float | None:
+    if valor is None or pd.isna(valor):
+        return None
+    return round(float(valor), decimales)
+
+
+def _construir_eventos() -> dict | None:
+    """Arma una sola vez la tabla compacta de eventos que consume el dashboard.
+
+    Se ejecuta al arrancar, no por petición: el DataFrame es estático (viene de
+    data.joblib) y recalcularlo en cada request sería trabajo repetido.
+    """
+    if stats_df is None:
+        return None
+
+    df = stats_df.copy()
+    for alias, columna in COLUMNAS_SUCIAS.items():
+        df[alias] = _a_numero(df[columna]) if columna in df.columns else np.nan
+
+    filas = []
+    for fila in df.itertuples(index=False):
+        registro = dict(zip(df.columns, fila))
+        filas.append([
+            int(registro["Año"]),
+            int(registro["Mes"]),
+            registro["Estado"],
+            registro["Clasificación del fenómeno"],
+            registro["Tipo de fenómeno"],
+            _entero_o_nulo(registro.get("Duración días")),
+            # Cuatro decimales, no dos: el daño no nulo más pequeño del dataset
+            # es 0.00047 millones (unos 466 pesos) y hay 76 eventos por debajo
+            # de 0.005. Redondear a dos decimales los mandaba a cero y el
+            # histograma reportaba 1,141 eventos "sin daño" donde hay 1,065.
+            _decimal_o_nulo(registro[target], 4) if registro[target] is not None else 0.0,
+            _entero_o_nulo(registro.get("Población afectada")),
+            _entero_o_nulo(registro.get("defunciones")),
+            _entero_o_nulo(registro.get("viviendas")),
+            _entero_o_nulo(registro.get("escuelas")),
+            _entero_o_nulo(registro.get("hospitales")),
+            _entero_o_nulo(registro.get("comercios")),
+            _decimal_o_nulo(registro.get("cultivo"), 1),
+        ])
+
+    return {"columnas": COLUMNAS_EVENTOS, "filas": filas, "total": len(filas)}
+
+
+eventos_payload = _construir_eventos()
+if eventos_payload is not None:
+    print(f"[eventos] tabla compacta lista: {eventos_payload['total']} filas.")
+
+
+@app.get("/stats/eventos")
+def stats_eventos():
+    """Dataset completo evento por evento, en formato compacto.
+
+    Se devuelve como lista de listas (no lista de objetos) para no repetir los
+    nombres de las 14 columnas 3,958 veces: reduce el JSON casi a la mitad.
+    """
+    if eventos_payload is None:
+        return _no_data()
+
+    return JSONResponse(content=eventos_payload, headers={"Cache-Control": STATS_CACHE})
+
+
+@app.get("/stats/dimensiones")
+def stats_dimensiones():
+    """Catálogos para armar los controles de filtro del dashboard.
+
+    Salen de los datos, no de una lista escrita a mano, para que el frontend no
+    pueda ofrecer un filtro que no existe en el dataset.
+    """
+    if stats_df is None:
+        return _no_data()
+
+    tipos_por_clasificacion = {
+        str(clasificacion): sorted(grupo["Tipo de fenómeno"].dropna().unique().tolist())
+        for clasificacion, grupo in stats_df.groupby("Clasificación del fenómeno")
+    }
+
+    return JSONResponse(
+        content={
+            "años": {
+                "min": int(stats_df["Año"].min()),
+                "max": int(stats_df["Año"].max()),
+            },
+            "estados":                 sorted(stats_df["Estado"].dropna().unique().tolist()),
+            "clasificaciones":         sorted(stats_df["Clasificación del fenómeno"].dropna().unique().tolist()),
+            "tipos":                   sorted(stats_df["Tipo de fenómeno"].dropna().unique().tolist()),
+            "tipos_por_clasificacion": tipos_por_clasificacion,
+            "total_eventos":           int(len(stats_df)),
+        },
         headers={"Cache-Control": STATS_CACHE},
     )

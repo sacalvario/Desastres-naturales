@@ -1,0 +1,76 @@
+/* ============================================================
+   Estilos que no se pueden expresar como estilo en línea
+   ------------------------------------------------------------
+   Los pseudo-elementos del input range (::-webkit-slider-thumb) solo existen en
+   CSS. El resto del dashboard usa estilos en línea, siguiendo la convención
+   que ya tenía el proyecto.
+   ============================================================ */
+
+/* Pulgares del rango de años.
+   La pista lleva pointer-events: none para que los dos inputs superpuestos no
+   se bloqueen entre sí; se devuelve el puntero únicamente al pulgar. */
+.pulgar-rango::-webkit-slider-thumb {
+  pointer-events: auto;
+  appearance: none;
+  -webkit-appearance: none;
+
+  width: 16px;
+  height: 16px;
+
+  background: #ffffff;
+  border: 2px solid #2a78d6;
+  border-radius: 50%;
+
+  cursor: grab;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.pulgar-rango::-webkit-slider-thumb:active {
+  cursor: grabbing;
+}
+
+.pulgar-rango::-moz-range-thumb {
+  pointer-events: auto;
+
+  width: 16px;
+  height: 16px;
+
+  background: #ffffff;
+  border: 2px solid #2a78d6;
+  border-radius: 50%;
+
+  cursor: grab;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.pulgar-rango::-moz-range-track {
+  background: transparent;
+  border: none;
+}
+
+/* index.css declara `input { width: 100% }` de forma global para el formulario
+   del predictor. En el dashboard hay inputs que deben conservar su ancho. */
+.dashboard input[type="range"] {
+  padding: 0;
+  border: none;
+}
+
+.dashboard input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+}
+
+/* Cabeceras de tabla ordenables */
+.dashboard th[data-ordenable] {
+  cursor: pointer;
+  user-select: none;
+}
+
+.dashboard th[data-ordenable]:hover {
+  background: #eff6ff;
+}
+
+.dashboard tbody tr:hover {
+  background: #f9fafb;
+}
