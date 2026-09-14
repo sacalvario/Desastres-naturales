@@ -242,6 +242,10 @@ export default function DashboardHistorico() {
   );
   const cubetas = useMemo(() => histogramaMagnitud(filtrados), [filtrados]);
 
+  // ¿El dataset tiene más de una clasificación? Si no, las piezas que comparan
+  // clasificaciones se ocultan en lugar de mostrar un 100 % sin información.
+  const hayClasificaciones = (dimensiones?.clasificaciones?.length ?? 0) > 1;
+
   // Porcentaje del total nacional que representa el recorte actual.
   const participacion = (parte, todo) => (todo > 0 ? (parte / todo) * 100 : 0);
   const hayFiltro = dimensiones ? !filtroVacio(filtro, dimensiones) : false;
@@ -374,7 +378,15 @@ export default function DashboardHistorico() {
       </div>
 
       {/* ── Estacionalidad + clasificación ───────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 270px", gap: 18, marginBottom: 20 }}>
+      {/* Con una sola clasificación en los datos, el reparto es un 100 % trivial:
+          una barra de un solo segmento que no compara nada. En ese caso la
+          estacionalidad ocupa el ancho completo. */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: hayClasificaciones ? "minmax(0, 1fr) 270px" : "minmax(0, 1fr)",
+        gap: 18,
+        marginBottom: 20,
+      }}>
         <Tarjeta
           titulo="Patrón estacional"
           ayuda="El mes es una de las siete variables de entrada del modelo, codificada como seno y coseno. Clic para filtrar; los doce meses siguen visibles."
@@ -387,14 +399,16 @@ export default function DashboardHistorico() {
           />
         </Tarjeta>
 
-        <Tarjeta titulo="Reparto por clasificación" ayuda="Clic para filtrar.">
-          <BarraProporcion
-            datos={porClasificacion}
-            metrica={metrica}
-            seleccion={filtro.clasificaciones}
-            onClic={alternarEn("clasificaciones")}
-          />
-        </Tarjeta>
+        {hayClasificaciones && (
+          <Tarjeta titulo="Reparto por clasificación" ayuda="Clic para filtrar.">
+            <BarraProporcion
+              datos={porClasificacion}
+              metrica={metrica}
+              seleccion={filtro.clasificaciones}
+              onClic={alternarEn("clasificaciones")}
+            />
+          </Tarjeta>
+        )}
       </div>
 
       {/* ── Rankings ─────────────────────────────────────────── */}
