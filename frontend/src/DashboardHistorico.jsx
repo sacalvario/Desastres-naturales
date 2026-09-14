@@ -348,19 +348,6 @@ export default function DashboardHistorico() {
         />
       </div>
 
-      {/* El contraste entre suma y mediana es el hallazgo central del dataset y
-          justifica una nota fija: sin ella, un lector concluiría que el desastre
-          promedio en México cuesta 169 millones de pesos, y no es así. */}
-      {metricaClave === "daños" && kpis.eventos > 0 && (
-        <Aviso tono="info">
-          El daño <strong>mediano</strong> por evento es de ${fmtNumero(kpis.medianaDaños, 2)} M,
-          frente a un <strong>promedio</strong> de ${fmtNumero(kpis.daños / kpis.eventos, 1)} M: unos
-          pocos desastres concentran casi todo el costo. Es la misma asimetría que obliga al modelo a
-          entrenar sobre el logaritmo del daño en lugar del valor crudo — se ve completa en el
-          histograma de magnitud, más abajo.
-        </Aviso>
-      )}
-
       {/* ── Serie anual ──────────────────────────────────────── */}
       <div style={{ marginBottom: 20 }}>
         <Tarjeta
