@@ -365,7 +365,7 @@ export default function DashboardHistorico() {
       <div style={{ marginBottom: 20 }}>
         <Tarjeta
           titulo={`${metrica.etiqueta} por año`}
-          ayuda="La suma responde cuánto costó el año; la mediana, cómo fue el evento típico."
+          ayuda="Suma: costo total del año. Mediana: el evento típico."
         >
           <GraficaAnual
             serie={anual}
@@ -389,7 +389,7 @@ export default function DashboardHistorico() {
       }}>
         <Tarjeta
           titulo="Patrón estacional"
-          ayuda="El mes es una de las siete variables de entrada del modelo, codificada como seno y coseno. Clic para filtrar; los doce meses siguen visibles."
+          ayuda="Clic para filtrar."
         >
           <GraficaEstacional
             serie={mensual}
@@ -415,7 +415,7 @@ export default function DashboardHistorico() {
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 18, marginBottom: 20 }}>
         <Tarjeta
           titulo={`Estados por ${metrica.corto.toLowerCase()}`}
-          ayuda="Ignora su propio filtro: los 32 estados siguen visibles para poder comparar."
+          ayuda="Ignora su propio filtro: los 32 estados siguen visibles."
           acciones={
             <select
               value={topN}
@@ -438,7 +438,7 @@ export default function DashboardHistorico() {
 
         <Tarjeta
           titulo={`Fenómenos por ${metrica.corto.toLowerCase()}`}
-          ayuda="Nueve tipos, una sola serie de color. Ignora su propio filtro para seguir comparando."
+          ayuda="Ignora su propio filtro: los nueve tipos siguen visibles."
         >
           <BarrasHorizontales
             datos={porTipo}
@@ -454,7 +454,7 @@ export default function DashboardHistorico() {
       <div style={{ marginBottom: 20 }}>
         <Tarjeta
           titulo="Distribución de la magnitud del daño"
-          ayuda="Bandas de potencias de diez. La montaña a la izquierda y la cola a la derecha son la razón de ser de la transformación logarítmica del modelo."
+          ayuda="Bandas de potencias de diez."
         >
           <Histograma cubetas={cubetas} />
         </Tarjeta>
@@ -475,7 +475,7 @@ export default function DashboardHistorico() {
       {/* ── Detalle ──────────────────────────────────────────── */}
       <Tarjeta
         titulo="Detalle de eventos"
-        ayuda="Ordena por cualquier columna. Es también la vista de tabla que respalda a las gráficas: los mismos datos sin depender del color."
+        ayuda="Ordena por cualquier columna."
       >
         <Tabla eventos={filtrados} />
       </Tarjeta>
