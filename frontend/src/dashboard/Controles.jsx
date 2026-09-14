@@ -400,7 +400,11 @@ export function Controles({
           ancho={150}
         />
 
-        <div style={{ display: "flex", gap: 6 }}>
+        {/* Un filtro con una sola opción no filtra nada: o lo dejas encendido y
+            no cambia el resultado, o lo apagas y vacías el tablero. Cuando el
+            dataset se restringe a un solo tipo de clasificación, estos chips
+            desaparecen en vez de quedarse como un control inerte. */}
+        <div style={{ display: dimensiones.clasificaciones.length > 1 ? "flex" : "none", gap: 6 }}>
           {dimensiones.clasificaciones.map((c) => (
             <Chip
               key={c}

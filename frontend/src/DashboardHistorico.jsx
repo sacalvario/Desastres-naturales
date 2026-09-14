@@ -242,6 +242,10 @@ export default function DashboardHistorico() {
   );
   const cubetas = useMemo(() => histogramaMagnitud(filtrados), [filtrados]);
 
+  // ¿El dataset tiene más de una clasificación? Si no, las piezas que comparan
+  // clasificaciones se ocultan en lugar de mostrar un 100 % sin información.
+  const hayClasificaciones = (dimensiones?.clasificaciones?.length ?? 0) > 1;
+
   // Porcentaje del total nacional que representa el recorte actual.
   const participacion = (parte, todo) => (todo > 0 ? (parte / todo) * 100 : 0);
   const hayFiltro = dimensiones ? !filtroVacio(filtro, dimensiones) : false;
@@ -344,24 +348,11 @@ export default function DashboardHistorico() {
         />
       </div>
 
-      {/* El contraste entre suma y mediana es el hallazgo central del dataset y
-          justifica una nota fija: sin ella, un lector concluiría que el desastre
-          promedio en México cuesta 169 millones de pesos, y no es así. */}
-      {metricaClave === "daños" && kpis.eventos > 0 && (
-        <Aviso tono="info">
-          El daño <strong>mediano</strong> por evento es de ${fmtNumero(kpis.medianaDaños, 2)} M,
-          frente a un <strong>promedio</strong> de ${fmtNumero(kpis.daños / kpis.eventos, 1)} M: unos
-          pocos desastres concentran casi todo el costo. Es la misma asimetría que obliga al modelo a
-          entrenar sobre el logaritmo del daño en lugar del valor crudo — se ve completa en el
-          histograma de magnitud, más abajo.
-        </Aviso>
-      )}
-
       {/* ── Serie anual ──────────────────────────────────────── */}
       <div style={{ marginBottom: 20 }}>
         <Tarjeta
           titulo={`${metrica.etiqueta} por año`}
-          ayuda="La suma responde cuánto costó el año; la mediana, cómo fue el evento típico."
+          ayuda="Suma: costo total del año. Mediana: el evento típico."
         >
           <GraficaAnual
             serie={anual}
@@ -374,10 +365,18 @@ export default function DashboardHistorico() {
       </div>
 
       {/* ── Estacionalidad + clasificación ───────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 270px", gap: 18, marginBottom: 20 }}>
+      {/* Con una sola clasificación en los datos, el reparto es un 100 % trivial:
+          una barra de un solo segmento que no compara nada. En ese caso la
+          estacionalidad ocupa el ancho completo. */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: hayClasificaciones ? "minmax(0, 1fr) 270px" : "minmax(0, 1fr)",
+        gap: 18,
+        marginBottom: 20,
+      }}>
         <Tarjeta
           titulo="Patrón estacional"
-          ayuda="El mes es una de las siete variables de entrada del modelo, codificada como seno y coseno. Clic para filtrar; los doce meses siguen visibles."
+          ayuda="Clic para filtrar."
         >
           <GraficaEstacional
             serie={mensual}
@@ -387,21 +386,23 @@ export default function DashboardHistorico() {
           />
         </Tarjeta>
 
-        <Tarjeta titulo="Reparto por clasificación" ayuda="Clic para filtrar.">
-          <BarraProporcion
-            datos={porClasificacion}
-            metrica={metrica}
-            seleccion={filtro.clasificaciones}
-            onClic={alternarEn("clasificaciones")}
-          />
-        </Tarjeta>
+        {hayClasificaciones && (
+          <Tarjeta titulo="Reparto por clasificación" ayuda="Clic para filtrar.">
+            <BarraProporcion
+              datos={porClasificacion}
+              metrica={metrica}
+              seleccion={filtro.clasificaciones}
+              onClic={alternarEn("clasificaciones")}
+            />
+          </Tarjeta>
+        )}
       </div>
 
       {/* ── Rankings ─────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 18, marginBottom: 20 }}>
         <Tarjeta
           titulo={`Estados por ${metrica.corto.toLowerCase()}`}
-          ayuda="Ignora su propio filtro: los 32 estados siguen visibles para poder comparar."
+          ayuda="Ignora su propio filtro: los 32 estados siguen visibles."
           acciones={
             <select
               value={topN}
@@ -424,7 +425,7 @@ export default function DashboardHistorico() {
 
         <Tarjeta
           titulo={`Fenómenos por ${metrica.corto.toLowerCase()}`}
-          ayuda="Nueve tipos, una sola serie de color. Ignora su propio filtro para seguir comparando."
+          ayuda="Ignora su propio filtro: los nueve tipos siguen visibles."
         >
           <BarrasHorizontales
             datos={porTipo}
@@ -440,7 +441,7 @@ export default function DashboardHistorico() {
       <div style={{ marginBottom: 20 }}>
         <Tarjeta
           titulo="Distribución de la magnitud del daño"
-          ayuda="Bandas de potencias de diez. La montaña a la izquierda y la cola a la derecha son la razón de ser de la transformación logarítmica del modelo."
+          ayuda="Bandas de potencias de diez."
         >
           <Histograma cubetas={cubetas} />
         </Tarjeta>
@@ -461,7 +462,7 @@ export default function DashboardHistorico() {
       {/* ── Detalle ──────────────────────────────────────────── */}
       <Tarjeta
         titulo="Detalle de eventos"
-        ayuda="Ordena por cualquier columna. Es también la vista de tabla que respalda a las gráficas: los mismos datos sin depender del color."
+        ayuda="Ordena por cualquier columna."
       >
         <Tabla eventos={filtrados} />
       </Tarjeta>
